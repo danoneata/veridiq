@@ -1,3 +1,4 @@
+import gc
 import pdb
 import random
 
@@ -8,7 +9,7 @@ from matplotlib import pyplot as plt
 from pathlib import Path
 
 from scipy.special import logsumexp
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from toolz import take, partition_all
 from tqdm import tqdm
 
@@ -30,6 +31,7 @@ from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
 
 from data import AV1M
 from utils import cache_np, implies
+import mymarkdown as md
 
 
 DEVICE = "cuda"
@@ -95,6 +97,7 @@ class FullModel(Module):
 
     def forward(self, x):
         x = self.model_features(x)
+        x = x / torch.linalg.norm(x, axis=1, keepdims=True)
         x = self.model_linear(x)
         return x
 
@@ -178,44 +181,70 @@ def get_label(datum):
         return None
 
 
+FPS = 25
+
+
+def time_to_index(time):
+    return int(time * FPS)
+
+
+def index_to_time(index):
+    return index / FPS
+
+
 def eval_video_level(preds_video, metadata):
     pred = preds_video
     true = [get_label(m) for m in metadata]
     return roc_auc_score(true, pred)
 
 
+def get_per_frame_labels(datum):
+    n = datum["video_frames"]
+    labels = np.zeros(n)
+    for s, e in datum["fake_segments"]:
+        s = time_to_index(s)
+        e = time_to_index(e)
+        labels[s:e] = 1
+    return labels
+
+
+def eval_per_video(preds, metadata):
+    def eval1(pred, datum):
+        pred = pred_to_proba(pred) > 0.5
+        true = get_per_frame_labels(datum)
+        true = true[:len(pred)]
+        return roc_auc_score(true, pred)
+
+    return [eval1(p, m) for p, m in zip(preds, metadata)]
+
+
 def aggregate_preds(preds):
     return logsumexp(preds)
 
 
-def select_rvra_or_fvfa(preds, metadata):
-    preds_metadata = [
-        (p, m) for p, m in zip(preds, metadata) if get_label(m) is not None
-    ]
+def select_by_labels(preds, metadata, labels):
+    preds_metadata = [(p, m) for p, m in zip(preds, metadata) if get_label(m) in labels]
     return zip(*preds_metadata)
 
 
+def select_fvfa(preds, metadata):
+    return select_by_labels(preds, metadata, labels=[1])
+
+
+def select_rvra_or_fvfa(preds, metadata):
+    return select_by_labels(preds, metadata, labels=[0, 1])
+
+
 def get_prediction_figure(preds, datum):
-    def time_to_index(time, fps):
-        return int(time * fps)
-
-    def index_to_time(index, fps):
-        return index / fps
-
-    # fps = get_fps(datum["file"])
-    fps = 25
-
     def show_fake_segment(ax, fake_segment):
         s = fake_segment[0]
-        # s = time_to_index(s, fps)
         e = fake_segment[1]
-        # e = time_to_index(e, fps)
         ax.axvspan(s, e, color="red", alpha=0.3)
 
     fig, axs = plt.subplots(figsize=(10, 6), nrows=2, sharex=True)
     probas = pred_to_proba(preds)
     indices = np.arange(len(preds))
-    times = index_to_time(indices, fps)
+    times = index_to_time(indices)
 
     axs[0].plot(times, preds)
     axs[0].set_ylabel("logit")
@@ -232,21 +261,17 @@ def get_prediction_figure(preds, datum):
     return fig
 
 
-def show1(preds, datum, my_grad_cam):
+def show1(preds, datum):
     video_path = DATASET.get_video_path(datum["file"])
     fig = get_prediction_figure(preds, datum)
     label = get_label(datum)
     label_str = "fake" if label == 1 else "real"
-    video_path_explanation = my_grad_cam.make_video(datum)
     st.markdown(
         "`{}` · label: {} · modify type: {}".format(
             datum["file"], label_str, datum["modify_type"]
         )
     )
-    # st.write(datum)
-    cols = st.columns(2)
-    cols[0].video(video_path)
-    cols[1].video(video_path_explanation)
+    st.video(video_path)
     st.pyplot(fig)
 
 
@@ -255,12 +280,6 @@ def reshape_transform(tensor, height=16, width=16):
     # Bring the channels to the first dimension, # like in CNNs.
     result = result.transpose(2, 3).transpose(1, 2)
     return result
-
-
-model_classifier = load_model()
-
-metadata = load_test_metadata()
-features = load_test_features()
 
 
 class MyGradCAM:
@@ -278,6 +297,7 @@ class MyGradCAM:
 
         self.transform_images = model_features.transform
 
+        pdb.set_trace()
         target_layers = [
             model_full.model_features.model.vision_model.encoder.layers[-1].layer_norm1
         ]
@@ -290,10 +310,16 @@ class MyGradCAM:
         )
 
     def get_explanation_batch(self, images):
+        n_images = len(images)
+
         images = self.transform_images(images)
         images = images.to(DEVICE)
 
-        n_images, *_ = images.shape
+        if n_images == 1:
+            # This is neede because transform_images squeezes the batch
+            # dimension if there is only one image.
+            images = images.unsqueeze(0)
+
         targets = [self.target for _ in range(n_images)]
 
         return self.grad_cam(
@@ -347,8 +373,8 @@ class MyGradCAM:
         path = path.with_suffix(".mp4")
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # if path.exists():
-        #     return path
+        if path.exists():
+            return path
 
         path_npy = path.with_suffix(".npy")
         frames = list(load_video_frames(datum))
@@ -376,7 +402,65 @@ class MyGradCAM:
         return path
 
 
-if __name__ == "__main__":
+def show_frames(preds, datum, my_grad_cam):
+    frames = list(load_video_frames(datum))
+    probas = pred_to_proba(preds)
+    labels = get_per_frame_labels(datum)
+
+    def get_info(i):
+        label = labels[i]
+        label_str = "fake" if label == 1 else "real"
+        return md.ul([
+            "frame: {:d} · time: {:.1f}s".format(i, index_to_time(i)),
+            "label: {}".format(label_str),
+            "proba: {:.2f}".format(probas[i]),
+        ])
+
+    for s, e in datum["fake_segments"]:
+        idx_s = time_to_index(s)
+        idx_e = time_to_index(e)
+
+        segment_scores = probas[idx_s:idx_e]
+        idx_1 = np.argmax(segment_scores) + idx_s
+
+        # Find thw two adjacent frames to the fake segment.
+        idx_0 = idx_s - 1 if idx_s > 0 else None
+        idx_2 = idx_e if idx_e < len(frames) else None
+
+        idxs = [idx_0, idx_1, idx_2]
+        cols = st.columns(3)
+
+        for i in range(3):
+            idx = idxs[i]
+            if idx is None:
+                continue
+
+            cols[i].markdown(get_info(idx))
+            cols[i].image(frames[idx])
+
+        cols = st.columns(3)
+        for i in range(3):
+            idx = idxs[i]
+            if idx is None:
+                continue
+
+            explanation = my_grad_cam.get_explanation_batch([frames[idx]])
+            cols[i].markdown("Grad-CAM · max score: {:.1f}".format(explanation[0].max()))
+            explanation = my_grad_cam.show_cam_on_image(frames[idx] / 255, explanation[0], use_rgb=True)
+            cols[i].image(explanation)
+
+
+@st.cache_resource
+def get_grad_cam_model():
+    return MyGradCAM()
+
+
+def show_temporal_explanations():
+    model_classifier = load_model()
+
+    metadata = load_test_metadata()
+    features = load_test_features()
+
     path = "output/clip-linear/predictions.npy"
     preds = cache_np(path, compute_predictions, model_classifier, features)
 
@@ -384,6 +468,7 @@ if __name__ == "__main__":
     preds_video = [aggregate_preds(p) for p in preds]
 
     auc = eval_video_level(preds_video, metadata)
+    scores_video = eval_per_video(preds, metadata)
 
     num_videos = len(preds)
     st.markdown("num. of selected videos: {}".format(num_videos))
@@ -393,8 +478,12 @@ if __name__ == "__main__":
     SELECTIONS = {
         "first": lambda n: range(n),
         "random": lambda n: random.sample(range(num_videos), n),
-        "highest-scores": lambda n: np.argsort(preds_video)[-n:],
-        "lowest-scores": lambda n: np.argsort(preds_video)[:n],
+        # videos with the highest or lowest per-frame scores
+        "highest-preds": lambda n: np.argsort(preds_video)[-n:],
+        "lowest-preds": lambda n: np.argsort(preds_video)[:n],
+        # videos that are best or worst according to the video-level scores
+        # "best": lambda n: np.argsort(scores_video)[-n:],
+        # "worst": lambda n: np.argsort(scores_video)[:n],
     }
 
     with st.sidebar:
@@ -408,11 +497,60 @@ if __name__ == "__main__":
             value=16,
         )
 
-    my_grad_cam = MyGradCAM()
-    indices = SELECTIONS[selection](10)
+    indices = SELECTIONS[selection](num_to_show)
 
     for i in indices:
         datum = metadata[i]
         pred = preds[i]
-        show1(pred, datum, my_grad_cam)
+        show1(pred, datum)
         st.markdown("---")
+
+
+def show_spatial_explanations():
+    st.set_page_config(layout="wide")
+
+    preds = np.load("output/clip-linear/predictions.npy", allow_pickle=True)
+    metadata = load_test_metadata()
+
+    preds, metadata = select_fvfa(preds, metadata)
+    scores_video = eval_per_video(preds, metadata)
+
+    num_videos = len(preds)
+
+    SELECTIONS = {
+        "random": lambda n: random.sample(range(num_videos), n),
+        "first": lambda n: range(n),
+        # videos that are best or worst according to the video-level scores
+        "best": lambda n: np.argsort(scores_video)[::-1][:n],
+        "worst": lambda n: np.argsort(scores_video)[:n],
+    }
+
+    with st.sidebar:
+        selection = st.selectbox(
+            "Video selection",
+            options=list(SELECTIONS.keys()),
+        )
+        num_to_show = st.number_input(
+            "Number of videos to show",
+            min_value=1,
+            value=16,
+        )
+
+    n_cols = 2
+    indices = SELECTIONS[selection](num_to_show)
+    my_grad_cam = get_grad_cam_model()
+
+    for group in partition_all(n_cols, indices):
+        cols = st.columns(n_cols)
+        for i, col in zip(group, cols):
+            datum = metadata[i]
+            pred = preds[i]
+            with col:
+                show1(pred, datum)
+                show_frames(pred, datum, my_grad_cam)
+                st.markdown("---")
+
+
+if __name__ == "__main__":
+    # show_temporal_explanations()
+    show_spatial_explanations()
