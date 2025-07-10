@@ -297,7 +297,6 @@ class MyGradCAM:
 
         self.transform_images = model_features.transform
 
-        pdb.set_trace()
         target_layers = [
             model_full.model_features.model.vision_model.encoder.layers[-1].layer_norm1
         ]
