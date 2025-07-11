@@ -1,7 +1,9 @@
 import gc
 import pdb
+import os
 import random
 
+from abc import ABC, abstractmethod
 from functools import partial
 from typing import Optional
 
@@ -17,6 +19,7 @@ from transformers import (
     CLIPModel,
     CLIPProcessor,
 )
+from huggingface_hub import hf_hub_download
 
 import cv2
 import numpy as np
@@ -25,23 +28,50 @@ import torch
 
 from torch import nn
 from torch.nn import Module
+from torchvision import transforms
 
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
 
 from data import AV1M
 from utils import cache_np, implies
+import fsfm.models_vit
 import mymarkdown as md
 
 
 DEVICE = "cuda"
-TEST_DIR = Path("/av1m-test/other/CLIP_features/test")
 DATASET = AV1M("val")
 
+FEATURES_DIR = {
+    "CLIP": Path("/data/av1m-test/other/CLIP_features/test"),
+    "FSFM": Path("/data/audio-video-deepfake/FSFM_face_features/test_face"),
+}
 
-class CLIP(nn.Module):
+
+class FeatureExtractor(ABC, nn.Module):
+    """Abstract base class for feature extractors."""
+
+    def __init__(self):
+        super().__init__()
+        self.feature_dim = None
+
+    @abstractmethod
+    def transform(self, x):
+        """Transform input images for the model."""
+        pass
+
+    @abstractmethod
+    def get_image_features(self, x):
+        """Extract features from transformed images."""
+        pass
+
+    def forward(self, x):
+        return self.get_image_features(x)
+
+
+class CLIP(FeatureExtractor):
     def __init__(self, model_id, tokens, layer):
-        super(CLIP, self).__init__()
+        super().__init__()
 
         assert tokens in ["CLS", "patches"]
         assert implies(layer == "post-projection", tokens == "CLS")
@@ -63,8 +93,13 @@ class CLIP(nn.Module):
     def transform(self, x):
         output = self.processor(images=x, return_tensors="pt")
         output = output["pixel_values"]
-        output = output.squeeze(0)
+        # output = output.squeeze(0)
         return output
+
+    def get_image_features(self, x):
+        # This method is required to satisfy the abstract base class.
+        # It will be replaced by the appropriate method in __init__.
+        raise NotImplementedError("get_image_features is set dynamically in __init__")
 
     def get_image_features_pre_projection(self, x, tokens, layer):
         outputs = self.model.vision_model(x, output_hidden_states=True)
@@ -80,6 +115,70 @@ class CLIP(nn.Module):
         return self.get_image_features(x)
 
 
+class FSFM(FeatureExtractor):
+    def __init__(self):
+        super().__init__()
+        self.model = self.load_model()
+        self.transform1 = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Resize((224, 224)),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ]
+        )
+
+    def load_model(self):
+        CKPT_NAME = "finetuned_models/FF++_c23_32frames/checkpoint-min_val_loss.pth"
+        CKPT_SAVE_PATH = "output/fsfm"
+        hf_hub_download(
+            repo_id="Wolowolo/fsfm-3c",
+            filename=CKPT_NAME,
+            local_dir=CKPT_SAVE_PATH,
+        )
+
+        model = fsfm.models_vit.vit_base_patch16(
+            global_pool="avg",
+            num_classes=2,
+        )
+        checkpoint = torch.load(
+            os.path.join(CKPT_SAVE_PATH, CKPT_NAME),
+            map_location="cpu",
+            weights_only=False,
+        )
+        model.load_state_dict(checkpoint["model"])
+
+        model.head = torch.nn.Identity()
+        model.head_drop = torch.nn.Identity()
+
+        model = model.to(DEVICE)
+        model.eval()
+
+        return model
+
+    def transform(self, x):
+        # Convert images to the format expected by the model.
+        # The model expects images of shape (B, 3, 224, 224).
+        x = [self.transform1(image) for image in x]
+        x = torch.stack(x, dim=0)
+        return x.to(DEVICE)
+
+    def get_image_features(self, x):
+        return self.model.forward_features(x)
+
+
+FEATURE_EXTRACTORS = {
+    "CLIP": lambda: CLIP(
+        "openai/clip-vit-large-patch14",
+        tokens="CLS",
+        layer="post-projection",
+    ),
+    "FSFM": lambda: FSFM(),
+}
+
+
 class LinearModel(Module):
     def __init__(self, dim=768):
         super().__init__()
@@ -90,13 +189,13 @@ class LinearModel(Module):
 
 
 class FullModel(Module):
-    def __init__(self, model_features, model_linear):
+    def __init__(self, feature_extractor: FeatureExtractor, model_linear):
         super().__init__()
-        self.model_features = model_features
+        self.feature_extractor = feature_extractor
         self.model_linear = model_linear
 
     def forward(self, x):
-        x = self.model_features(x)
+        x = self.feature_extractor(x)
         x = x / torch.linalg.norm(x, axis=1, keepdims=True)
         x = self.model_linear(x)
         return x
@@ -122,8 +221,13 @@ def pred_to_proba(score):
     return 1.0 / (1.0 + np.exp(-2 * score))
 
 
-def load_model():
-    checkpoint = torch.load("output/clip-linear/model-epoch=98.ckpt")
+def load_model_classifier(feature_extractor_type):
+    PATHS = {
+        "CLIP": "output/clip-linear/model-epoch=98.ckpt",
+        "FSFM": "output/fsfm-linear/model-epoch=99.ckpt",
+    }
+    path = PATHS[feature_extractor_type]
+    checkpoint = torch.load(path)
     model = LinearModel()
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
@@ -131,18 +235,18 @@ def load_model():
     return model
 
 
-def load_test_metadata():
+def load_test_metadata(feature_extractor_type):
     metadata = DATASET.load_filelist()
     path_to_metadata = {m["file"]: m for m in metadata}
 
-    path = TEST_DIR / "paths.npy"
+    path = FEATURES_DIR[feature_extractor_type] / "paths.npy"
     paths = np.load(path, allow_pickle=True)
 
     return [path_to_metadata[p] for p in paths]
 
 
-def load_test_features():
-    path = TEST_DIR / "video.npy"
+def load_test_features(feature_extractor_type):
+    path = FEATURES_DIR[feature_extractor_type] / "video.npy"
     features = np.load(path, allow_pickle=True)
     return features
 
@@ -212,7 +316,7 @@ def eval_per_video(preds, metadata):
     def eval1(pred, datum):
         pred = pred_to_proba(pred) > 0.5
         true = get_per_frame_labels(datum)
-        true = true[:len(pred)]
+        true = true[: len(pred)]
         return roc_auc_score(true, pred)
 
     return [eval1(p, m) for p, m in zip(preds, metadata)]
@@ -283,29 +387,47 @@ def reshape_transform(tensor, height=16, width=16):
 
 
 class MyGradCAM:
-    def __init__(self):
-        model_features = CLIP(
-            "openai/clip-vit-large-patch14",
-            tokens="CLS",
-            layer="post-projection",
-        )
-        model_classifier = load_model()
+    def __init__(self, feature_extractor_type="CLIP"):
+        SIZES = {
+            "CLIP": {
+                "height": 16,
+                "width": 16,
+            },
+            "FSFM": {
+                "height": 14,
+                "width": 14,
+            },
+        }
 
-        model_full = FullModel(model_features, model_classifier)
+        feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
+        model_classifier = load_model_classifier()
+
+        model_full = FullModel(feature_extractor, model_classifier)
         model_full.eval()
         model_full.to(DEVICE)
 
-        self.transform_images = model_features.transform
+        self.transform_images = feature_extractor.transform
+        self.feature_extractor_type = feature_extractor_type
 
-        target_layers = [
-            model_full.model_features.model.vision_model.encoder.layers[-1].layer_norm1
-        ]
+        # Dictionary mapping feature extractor types to their target layers
+        TARGET_LAYERS = {
+            "CLIP": lambda model: [
+                model.feature_extractor.model.vision_model.encoder.layers[
+                    -1
+                ].layer_norm1
+            ],
+            "FSFM": lambda model: [model.feature_extractor.model.blocks[-1]],
+        }
+
+        target_layers = TARGET_LAYERS[feature_extractor_type](model_full)
         self.target = BinaryClassifierOutputTarget(1)
 
         self.grad_cam = GradCAM(
             model=model_full,
             target_layers=target_layers,
-            reshape_transform=reshape_transform,
+            reshape_transform=partial(
+                reshape_transform, **SIZES[feature_extractor_type]
+            ),
         )
 
     def get_explanation_batch(self, images):
@@ -313,11 +435,6 @@ class MyGradCAM:
 
         images = self.transform_images(images)
         images = images.to(DEVICE)
-
-        if n_images == 1:
-            # This is neede because transform_images squeezes the batch
-            # dimension if there is only one image.
-            images = images.unsqueeze(0)
 
         targets = [self.target for _ in range(n_images)]
 
@@ -409,11 +526,13 @@ def show_frames(preds, datum, my_grad_cam):
     def get_info(i):
         label = labels[i]
         label_str = "fake" if label == 1 else "real"
-        return md.ul([
-            "frame: {:d} · time: {:.1f}s".format(i, index_to_time(i)),
-            "label: {}".format(label_str),
-            "proba: {:.2f}".format(probas[i]),
-        ])
+        return md.ul(
+            [
+                "frame: {:d} · time: {:.1f}s".format(i, index_to_time(i)),
+                "label: {}".format(label_str),
+                "proba: {:.2f}".format(probas[i]),
+            ]
+        )
 
     for s, e in datum["fake_segments"]:
         idx_s = time_to_index(s)
@@ -444,23 +563,58 @@ def show_frames(preds, datum, my_grad_cam):
                 continue
 
             explanation = my_grad_cam.get_explanation_batch([frames[idx]])
-            cols[i].markdown("Grad-CAM · max score: {:.1f}".format(explanation[0].max()))
-            explanation = my_grad_cam.show_cam_on_image(frames[idx] / 255, explanation[0], use_rgb=True)
+            cols[i].markdown(
+                "Grad-CAM · max score: {:.1f}".format(explanation[0].max())
+            )
+            explanation = my_grad_cam.show_cam_on_image(
+                frames[idx] / 255, explanation[0], use_rgb=True
+            )
             cols[i].image(explanation)
 
 
 @st.cache_resource
-def get_grad_cam_model():
-    return MyGradCAM()
+def get_grad_cam_model(feature_extractor_type="CLIP", **kwargs):
+    return MyGradCAM(feature_extractor_type=feature_extractor_type, **kwargs)
+
+
+def get_predictions_path(feature_extractor_type):
+    return "output/clip-linear/predictions-{}.npy".format(feature_extractor_type.lower())
 
 
 def show_temporal_explanations():
-    model_classifier = load_model()
+    SELECTIONS = {
+        "first": lambda n: range(n),
+        "random": lambda n: random.sample(range(num_videos), n),
+        # videos with the highest or lowest per-frame scores
+        "highest-preds": lambda n: np.argsort(preds_video)[-n:],
+        "lowest-preds": lambda n: np.argsort(preds_video)[:n],
+        # videos that are best or worst according to the video-level scores
+        # "best": lambda n: np.argsort(scores_video)[-n:],
+        # "worst": lambda n: np.argsort(scores_video)[:n],
+    }
 
-    metadata = load_test_metadata()
-    features = load_test_features()
+    with st.sidebar:
+        feature_extractor_type = st.selectbox(
+            "Feature Extractor",
+            options=["CLIP", "FSFM"],
+            index=1,
+        )
+        selection = st.selectbox(
+            "Video selection",
+            options=list(SELECTIONS.keys()),
+        )
+        num_to_show = st.number_input(
+            "Number of videos to show",
+            min_value=1,
+            value=16,
+        )
 
-    path = "output/clip-linear/predictions.npy"
+    model_classifier = load_model_classifier(feature_extractor_type)
+
+    metadata = load_test_metadata(feature_extractor_type)
+    features = load_test_features(feature_extractor_type)
+
+    path = get_predictions_path(feature_extractor_type)
     preds = cache_np(path, compute_predictions, model_classifier, features)
 
     preds, metadata = select_rvra_or_fvfa(preds, metadata)
@@ -474,28 +628,6 @@ def show_temporal_explanations():
     st.markdown("AUC: {:.2f}%".format(100 * auc))
     st.markdown("---")
 
-    SELECTIONS = {
-        "first": lambda n: range(n),
-        "random": lambda n: random.sample(range(num_videos), n),
-        # videos with the highest or lowest per-frame scores
-        "highest-preds": lambda n: np.argsort(preds_video)[-n:],
-        "lowest-preds": lambda n: np.argsort(preds_video)[:n],
-        # videos that are best or worst according to the video-level scores
-        # "best": lambda n: np.argsort(scores_video)[-n:],
-        # "worst": lambda n: np.argsort(scores_video)[:n],
-    }
-
-    with st.sidebar:
-        selection = st.selectbox(
-            "Video selection",
-            options=list(SELECTIONS.keys()),
-        )
-        num_to_show = st.number_input(
-            "Number of videos to show",
-            min_value=1,
-            value=16,
-        )
-
     indices = SELECTIONS[selection](num_to_show)
 
     for i in indices:
@@ -508,23 +640,19 @@ def show_temporal_explanations():
 def show_spatial_explanations():
     st.set_page_config(layout="wide")
 
-    preds = np.load("output/clip-linear/predictions.npy", allow_pickle=True)
-    metadata = load_test_metadata()
-
-    preds, metadata = select_fvfa(preds, metadata)
-    scores_video = eval_per_video(preds, metadata)
-
-    num_videos = len(preds)
-
     SELECTIONS = {
         "random": lambda n: random.sample(range(num_videos), n),
         "first": lambda n: range(n),
-        # videos that are best or worst according to the video-level scores
         "best": lambda n: np.argsort(scores_video)[::-1][:n],
         "worst": lambda n: np.argsort(scores_video)[:n],
     }
 
     with st.sidebar:
+        feature_extractor_type = st.selectbox(
+            "Feature Extractor",
+            options=["CLIP", "FSFM"],
+            index=1,
+        )
         selection = st.selectbox(
             "Video selection",
             options=list(SELECTIONS.keys()),
@@ -535,9 +663,17 @@ def show_spatial_explanations():
             value=16,
         )
 
+    preds = np.load(get_predictions_path(feature_extractor_type), allow_pickle=True)
+    metadata = load_test_metadata(feature_extractor_type)
+
+    preds, metadata = select_fvfa(preds, metadata)
+    scores_video = eval_per_video(preds, metadata)
+
+    num_videos = len(preds)
+
     n_cols = 2
     indices = SELECTIONS[selection](num_to_show)
-    my_grad_cam = get_grad_cam_model()
+    my_grad_cam = get_grad_cam_model(feature_extractor_type=feature_extractor_type)
 
     for group in partition_all(n_cols, indices):
         cols = st.columns(n_cols)
@@ -551,5 +687,5 @@ def show_spatial_explanations():
 
 
 if __name__ == "__main__":
-    # show_temporal_explanations()
-    show_spatial_explanations()
+    show_temporal_explanations()
+    # show_spatial_explanations()
