@@ -1,0 +1,16 @@
+numpy
+pandas
+torch
+torchvision
+matplotlib
+pillow
+scipy
+scikit-learn
+toolz
+tqdm
+transformers
+huggingface-hub
+opencv-python
+streamlit
+timm
+pytorch-grad-cam

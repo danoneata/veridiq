@@ -9,6 +9,7 @@ from typing import Optional
 
 from matplotlib import pyplot as plt
 from pathlib import Path
+from PIL import Image
 
 from scipy.special import logsumexp
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -33,10 +34,10 @@ from torchvision import transforms
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
 
-from data import AV1M
-from utils import cache_np, implies
-import fsfm.models_vit
-import mymarkdown as md
+from veridiq.data import AV1M
+from veridiq.utils import cache_np, implies
+import veridiq.fsfm.models_vit
+import veridiq.mymarkdown as md
 
 
 DEVICE = "cuda"
@@ -78,6 +79,9 @@ class CLIP(FeatureExtractor):
 
         self.model = CLIPModel.from_pretrained(model_id).eval()
         self.processor = CLIPProcessor.from_pretrained(model_id)
+
+        self.model.to(DEVICE)
+        self.model.eval()
 
         if layer == "post-projection":
             self.feature_dim = self.model.config.projection_dim
@@ -121,8 +125,8 @@ class FSFM(FeatureExtractor):
         self.model = self.load_model()
         self.transform1 = transforms.Compose(
             [
-                transforms.ToTensor(),
                 transforms.Resize((224, 224)),
+                transforms.ToTensor(),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -139,7 +143,7 @@ class FSFM(FeatureExtractor):
             local_dir=CKPT_SAVE_PATH,
         )
 
-        model = fsfm.models_vit.vit_base_patch16(
+        model = veridiq.fsfm.models_vit.vit_base_patch16(
             global_pool="avg",
             num_classes=2,
         )
@@ -161,7 +165,7 @@ class FSFM(FeatureExtractor):
     def transform(self, x):
         # Convert images to the format expected by the model.
         # The model expects images of shape (B, 3, 224, 224).
-        x = [self.transform1(image) for image in x]
+        x = [self.transform1(Image.fromarray(image)) for image in x]
         x = torch.stack(x, dim=0)
         return x.to(DEVICE)
 
@@ -235,13 +239,16 @@ def load_model_classifier(feature_extractor_type):
     return model
 
 
+def load_test_paths(feature_extractor_type):
+    path = FEATURES_DIR[feature_extractor_type] / "paths.npy"
+    paths = np.load(path, allow_pickle=True)
+    return paths
+
+
 def load_test_metadata(feature_extractor_type):
     metadata = DATASET.load_filelist()
     path_to_metadata = {m["file"]: m for m in metadata}
-
-    path = FEATURES_DIR[feature_extractor_type] / "paths.npy"
-    paths = np.load(path, allow_pickle=True)
-
+    paths = load_test_paths(feature_extractor_type)
     return [path_to_metadata[p] for p in paths]
 
 
@@ -400,7 +407,7 @@ class MyGradCAM:
         }
 
         feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
-        model_classifier = load_model_classifier()
+        model_classifier = load_model_classifier(feature_extractor_type)
 
         model_full = FullModel(feature_extractor, model_classifier)
         model_full.eval()

@@ -6,7 +6,7 @@ class AV1M:
     def __init__(self, split):
         assert split in {"train", "val"}
         self.split = split
-        self.root = Path("/av-deepfake-1m/av_deepfake_1m")
+        self.root = Path("/data/av-deepfake-1m/av_deepfake_1m")
 
     def load_filelist(self):
         path = self.root / f"{self.split}_metadata.json"
@@ -21,6 +21,7 @@ class AV1M:
 DATASETS = {
     "av1m": AV1M,
 }
+
 
 if __name__ == "__main__":
     import streamlit as st
