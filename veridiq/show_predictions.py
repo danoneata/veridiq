@@ -691,7 +691,7 @@ def show_spatial_explanations():
             "Feature Extractor",
             options=["CLIP", "FSFM"],
             index=1,
-        /fi )
+        )
         selection = st.selectbox(
             "Video selection",
             options=list(SELECTIONS.keys()),
