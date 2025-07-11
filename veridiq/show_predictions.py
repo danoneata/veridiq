@@ -323,8 +323,20 @@ def eval_per_video(preds, metadata):
     def eval1(pred, datum):
         pred = pred_to_proba(pred) > 0.5
         true = get_per_frame_labels(datum)
-        true = true[: len(pred)]
-        return roc_auc_score(true, pred)
+        n_pred = len(pred)
+        n_true = len(true)
+        diff = abs(n_pred - n_true)
+        if diff > 2:
+            print(diff)
+            print(datum)
+            print()
+            pdb.set_trace()
+            return 0
+        else:
+            n = min(n_pred, n_true)
+            true = true[:n]
+            pred = pred[:n]
+            return roc_auc_score(true, pred)
 
     return [eval1(p, m) for p, m in zip(preds, metadata)]
 
@@ -618,17 +630,37 @@ def show_temporal_explanations():
 
     model_classifier = load_model_classifier(feature_extractor_type)
 
-    metadata = load_test_metadata(feature_extractor_type)
-    features = load_test_features(feature_extractor_type)
-
+    metadata0 = load_test_metadata(feature_extractor_type)
+    features0 = load_test_features(feature_extractor_type)
     path = get_predictions_path(feature_extractor_type)
-    preds = cache_np(path, compute_predictions, model_classifier, features)
+    preds = cache_np(path, compute_predictions, model_classifier, features0)
 
-    preds, metadata = select_rvra_or_fvfa(preds, metadata)
+    preds, metadata = select_rvra_or_fvfa(preds, metadata0)
     preds_video = [aggregate_preds(p) for p in preds]
 
+    # feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
+    # video = load_video_frames(metadata[0])
+    # for frames in partition_all(16, video):
+    #     frames = feature_extractor.transform(frames)
+    #     frames = frames.to(DEVICE)
+    #     with torch.no_grad():
+    #         f = feature_extractor.get_image_features(frames)
+    #     print(f)
+    #     print(feats[0][:16])
+    #     pdb.set_trace()
+
     auc = eval_video_level(preds_video, metadata)
-    scores_video = eval_per_video(preds, metadata)
+    # feats, _ = select_rvra_or_fvfa(features0, metadata0)
+    # scores_video = eval_per_video(preds, metadata)
+
+    # for i, s in enumerate(scores_video):
+    #     if s == 0:
+    #         print(metadata[i])
+    #         print(metadata[i]["video_frames"])
+    #         print(len(list(load_video_frames(metadata[i]))))
+    #         print(len(preds[i]))
+    #         print()
+    #         pdb.set_trace()
 
     num_videos = len(preds)
     st.markdown("num. of selected videos: {}".format(num_videos))
@@ -659,7 +691,7 @@ def show_spatial_explanations():
             "Feature Extractor",
             options=["CLIP", "FSFM"],
             index=1,
-        )
+        /fi )
         selection = st.selectbox(
             "Video selection",
             options=list(SELECTIONS.keys()),
