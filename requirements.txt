@@ -13,4 +13,4 @@ huggingface-hub
 opencv-python
 streamlit
 timm
-# pytorch-grad-cam
+grad-cam
