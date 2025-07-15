@@ -1,6 +1,6 @@
 # Veridiq
 
-A package for deepfake detection and verification using the AV1M dataset.
+A package for deepfake detection using the AV1M dataset.
 
 ## Installation
 
@@ -9,10 +9,18 @@ Install in development mode:
 pip install -e .
 ```
 
+Download linear models on CLIP and FSFM features:
+```bash
+wget https://github.com/danoneata/veridiq/releases/download/v0.0.1/output.zip
+unzip output.zip
+```
+
 ## Requirements
 
 - Python 3.7+
 - AV1M dataset located at `/data/av-deepfake-1m/av_deepfake_1m/`
+- AV1M CLIP features located at `/data/av1m-test/other/CLIP_features/test`
+- AV1M FSFM features located at `/data/audio-video-deepfake/FSFM_face_features/test_face`
 
 ## Project Structure
 
