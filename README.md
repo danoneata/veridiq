@@ -38,6 +38,11 @@ Activate the conda environment:
 conda activate veridiq
 ```
 
+Visualize explanations:
+```bash
+streamlit run --server.port 8080 veridiq/show_predictions.py
+```
+
 ## Development
 
 Format code using:
