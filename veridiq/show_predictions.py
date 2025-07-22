@@ -45,7 +45,8 @@ DATASET = AV1M("val")
 
 FEATURES_DIR = {
     "CLIP": Path("/data/av1m-test/other/CLIP_features/test"),
-    "FSFM": Path("/data/audio-video-deepfake/FSFM_face_features/test_face"),
+    "FSFM": Path("/data/audio-video-deepfake-3/FSFM_face_features/test_face_fix"),
+    "VideoMAE": Path("/data/audio-video-deepfake-2/Video_MAE_large/test"),
 }
 
 
@@ -173,6 +174,25 @@ class FSFM(FeatureExtractor):
         return self.model.forward_features(x)
 
 
+class VideoMAE(FeatureExtractor):
+    def __init__(self, model_id):
+        super().__init__()
+        path = "MCG-NJU/videomae-large"
+        self.processor = VideoMAEImageProcessor.from_pretrained(path)
+        self.model = VideoMAEModel.from_pretrained(path)
+
+        self.model.to(DEVICE)
+        self.model.eval()
+
+    def transform(self, x):
+        # Convert images to the format expected by the model.
+        x = [Image.fromarray(image) for image in x]
+        return self.model.preprocess(x)
+
+    def get_image_features(self, x):
+        return self.model.forward_features(x)
+
+
 FEATURE_EXTRACTORS = {
     "CLIP": lambda: CLIP(
         "openai/clip-vit-large-patch14",
@@ -228,11 +248,21 @@ def pred_to_proba(score):
 def load_model_classifier(feature_extractor_type):
     PATHS = {
         "CLIP": "output/clip-linear/model-epoch=98.ckpt",
-        "FSFM": "output/fsfm-linear/model-epoch=99.ckpt",
+        "FSFM": "output/fsfm-linear/model-epoch=98.ckpt",
+        "VideoMAE": "output/videomae-linear/model-epoch=99.ckpt",
     }
+    DIMS = {
+        "CLIP": 768,
+        "FSFM": 768,
+        "VideoMAE": 1024,
+    }
+
     path = PATHS[feature_extractor_type]
     checkpoint = torch.load(path)
-    model = LinearModel()
+
+    dim = DIMS[feature_extractor_type]
+    model = LinearModel(dim)
+
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     model.to(DEVICE)
@@ -330,7 +360,7 @@ def eval_per_video(preds, metadata):
             print(diff)
             print(datum)
             print()
-            pdb.set_trace()
+            # pdb.set_trace()
             return 0
         else:
             n = min(n_pred, n_true)
@@ -597,7 +627,7 @@ def get_grad_cam_model(feature_extractor_type="CLIP", **kwargs):
 
 
 def get_predictions_path(feature_extractor_type):
-    return "output/clip-linear/predictions-{}.npy".format(
+    return "output/{}-linear/predictions.npy".format(
         feature_extractor_type.lower()
     )
 
@@ -617,12 +647,13 @@ def show_temporal_explanations():
     with st.sidebar:
         feature_extractor_type = st.selectbox(
             "Feature Extractor",
-            options=["CLIP", "FSFM"],
-            index=1,
+            options=["CLIP", "FSFM", "VideoMAE"],
+            index=2,
         )
         selection = st.selectbox(
             "Video selection",
             options=list(SELECTIONS.keys()),
+            index=2,
         )
         num_to_show = st.number_input(
             "Number of videos to show",
@@ -634,6 +665,7 @@ def show_temporal_explanations():
 
     metadata0 = load_test_metadata(feature_extractor_type)
     features0 = load_test_features(feature_extractor_type)
+
     path = get_predictions_path(feature_extractor_type)
     preds = cache_np(path, compute_predictions, model_classifier, features0)
 
@@ -648,21 +680,12 @@ def show_temporal_explanations():
     #     with torch.no_grad():
     #         f = feature_extractor.get_image_features(frames)
     #     print(f)
-    #     print(feats[0][:16])
+    #     print(features0[0][:16])
     #     pdb.set_trace()
 
     auc = eval_video_level(preds_video, metadata)
     # feats, _ = select_rvra_or_fvfa(features0, metadata0)
     # scores_video = eval_per_video(preds, metadata)
-
-    # for i, s in enumerate(scores_video):
-    #     if s == 0:
-    #         print(metadata[i])
-    #         print(metadata[i]["video_frames"])
-    #         print(len(list(load_video_frames(metadata[i]))))
-    #         print(len(preds[i]))
-    #         print()
-    #         pdb.set_trace()
 
     num_videos = len(preds)
     st.markdown("num. of selected videos: {}".format(num_videos))
@@ -692,11 +715,12 @@ def show_spatial_explanations():
         feature_extractor_type = st.selectbox(
             "Feature Extractor",
             options=["CLIP", "FSFM"],
-            index=0,
+            index=1,
         )
         selection = st.selectbox(
             "Video selection",
             options=list(SELECTIONS.keys()),
+            index=2,
         )
         num_to_show = st.number_input(
             "Number of videos to show",
@@ -829,6 +853,6 @@ def show_frames_classifier_maximization():
 
 
 if __name__ == "__main__":
-    # show_temporal_explanations()
-    show_spatial_explanations()
+    show_temporal_explanations()
+    # show_spatial_explanations()
     # show_frames_classifier_maximization()
