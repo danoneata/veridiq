@@ -19,6 +19,8 @@ from tqdm import tqdm
 from transformers import (
     CLIPModel,
     CLIPProcessor,
+    VideoMAEImageProcessor,
+    VideoMAEModel,
 )
 from huggingface_hub import hf_hub_download
 
@@ -200,6 +202,7 @@ FEATURE_EXTRACTORS = {
         layer="post-projection",
     ),
     "FSFM": lambda: FSFM(),
+    # "VideoMAE": lambda: VideoMAE("MCG-NJU/videomae-large"),
 }
 
 
@@ -329,8 +332,8 @@ def time_to_index(time):
     return int(time * FPS)
 
 
-def index_to_time(index):
-    return index / FPS
+def index_to_time(index, subsampling_factor=1):
+    return index * subsampling_factor / FPS
 
 
 def eval_video_level(preds_video, metadata):
@@ -388,7 +391,10 @@ def select_rvra_or_fvfa(preds, metadata):
     return select_by_labels(preds, metadata, labels=[0, 1])
 
 
-def get_prediction_figure(preds, datum):
+def get_prediction_figure(preds, datum, feature_extractor_type="CLIP"):
+    subsampling_factors = {"CLIP": 1, "FSFM": 1, "VideoMAE": 2}
+    subsampling_factor = subsampling_factors[feature_extractor_type]
+
     def show_fake_segment(ax, fake_segment):
         s = fake_segment[0]
         e = fake_segment[1]
@@ -397,7 +403,7 @@ def get_prediction_figure(preds, datum):
     fig, axs = plt.subplots(figsize=(10, 6), nrows=2, sharex=True)
     probas = pred_to_proba(preds)
     indices = np.arange(len(preds))
-    times = index_to_time(indices)
+    times = index_to_time(indices, subsampling_factor)
 
     axs[0].plot(times, preds)
     axs[0].set_ylabel("logit")
@@ -414,9 +420,9 @@ def get_prediction_figure(preds, datum):
     return fig
 
 
-def show1(preds, datum):
+def show1(preds, datum, feature_extractor_type):
     video_path = DATASET.get_video_path(datum["file"])
-    fig = get_prediction_figure(preds, datum)
+    fig = get_prediction_figure(preds, datum, feature_extractor_type)
     label = get_label(datum)
     label_str = "fake" if label == 1 else "real"
     st.markdown(
@@ -627,9 +633,7 @@ def get_grad_cam_model(feature_extractor_type="CLIP", **kwargs):
 
 
 def get_predictions_path(feature_extractor_type):
-    return "output/{}-linear/predictions.npy".format(
-        feature_extractor_type.lower()
-    )
+    return "output/{}-linear/predictions.npy".format(feature_extractor_type.lower())
 
 
 def show_temporal_explanations():
@@ -672,6 +676,7 @@ def show_temporal_explanations():
     preds, metadata = select_rvra_or_fvfa(preds, metadata0)
     preds_video = [aggregate_preds(p) for p in preds]
 
+    # Test feature extractor
     # feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
     # video = load_video_frames(metadata[0])
     # for frames in partition_all(16, video):
@@ -697,7 +702,7 @@ def show_temporal_explanations():
     for i in indices:
         datum = metadata[i]
         pred = preds[i]
-        show1(pred, datum)
+        show1(pred, datum, feature_extractor_type)
         st.markdown("---")
 
 
@@ -746,7 +751,7 @@ def show_spatial_explanations():
             datum = metadata[i]
             pred = preds[i]
             with col:
-                show1(pred, datum)
+                show1(pred, datum, feature_extractor_type)
                 show_frames(pred, datum, my_grad_cam)
                 st.markdown("---")
 
