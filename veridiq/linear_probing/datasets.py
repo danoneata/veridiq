@@ -62,10 +62,10 @@ class AV1M_trainval_dataset(Dataset):
             video = feats['visual']
             audio = feats['audio']
         elif self.config["input_type"] == "audio":
-            audio = feats['audio']
+            audio = feats
             video = -np.ones((video.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "video":
-            video = feats['visual']
+            video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
         else:
             raise ValueError(f"input_type should be both, video or audio! Got: " + self.config["input_type"])
@@ -74,7 +74,7 @@ class AV1M_trainval_dataset(Dataset):
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
 
-        return torch.tensor(video), torch.tensor(audio), label, row["path"][:-4] + ".npz"  # video, audio, label, path
+        return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
 
 
 class AV1M_test_dataset(Dataset):
@@ -160,7 +160,7 @@ class AV1M_test_dataset(Dataset):
 
         label = self.labels[path]
 
-        return torch.tensor(video), torch.tensor(audio), label, path  # video, audio, label, path
+        return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, path  # video, audio, label, path
 
 ###### ######
 
