@@ -24,7 +24,7 @@ class LinearModel(L.LightningModule):
             fused_features = torch.cat((video_feats, audio_feats), dim=-1)
         elif self.input_type == "audio":
             fused_features = audio_feats
-        elif self.input_type == "video":
+        elif self.input_type == "video" or self.input_type == "multimodal":  # for multimodal, video_feats and audio_feats are equal
             fused_features = video_feats
         else:
             raise ValueError(f"Error! Input type: {self.input_type}")
