@@ -6,6 +6,12 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+INVALID_VIDS = [
+    "FakeVideo-FakeAudio/African/women/id02071/00195_id01661_SdP_Monh-_4_id04547_wavtolip.mp4",
+    "FakeVideo-FakeAudio/African/women/id02071/00195_id04245_nQD_PRlBDyw_id03658_wavtolip.mp4",
+    "FakeVideo-FakeAudio/African/men/id01170/00021_id01933_I5XXxgK7QpE_id00781_wavtolip.mp4",
+    "RealVideo-RealAudio/Asian_East/men/id04789/002121.mp4",
+]
 
 ###### AV1M ######
 
@@ -17,30 +23,43 @@ class AV1M_trainval_dataset(Dataset):
         self.root_path = self.config["root_path"]
         self.csv_root_path = self.config["csv_root_path"]
 
-        self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
-        self.feats_dir = os.path.join(self.root_path, self.split)
+        if config["dataset_name"] == "AV1M":
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
+            self.feats_dir = os.path.join(self.root_path, self.split)
+        elif config["dataset_name"] == "FAVC":
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_split.csv"))
+            self.feats_dir = self.root_path
+            self.df['path'] = self.df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
+            self.df['label'] = self.df['category'].map({'A': 0, 'D': 1})
+            self.df = self.df[~self.df['path'].isin(INVALID_VIDS)]
+        else:
+            raise ValueError("Wrong dataset_name!")
 
         if "fvfa_rvra_only" in config and config["fvfa_rvra_only"]:
-            with open(config["metadata_path"], "r") as f:
-                metadata = json.load(f)
+            if config["dataset_name"] == "AV1M":
+                with open(config["metadata_path"], "r") as f:
+                    metadata = json.load(f)
 
-            remove_paths = []
-            set_paths = set(self.df['path'].to_list())
-            for md in metadata:
-                if md["file"] in set_paths:
-                    if (len(md['audio_fake_segments']) > 0 and len(md['visual_fake_segments']) > 0) or len(md['fake_segments']) == 0:
-                        continue
-                    else:
-                        remove_paths.append(md["file"])
+                remove_paths = []
+                set_paths = set(self.df['path'].to_list())
+                for md in metadata:
+                    if md["file"] in set_paths:
+                        if (len(md['audio_fake_segments']) > 0 and len(md['visual_fake_segments']) > 0) or len(md['fake_segments']) == 0:
+                            continue
+                        else:
+                            remove_paths.append(md["file"])
 
-            remove_paths = set(remove_paths)
-            remove_indices = []
-            for idx in self.df.index:
-                if self.df.iloc[idx]['path'] in remove_paths:
-                    remove_indices.append(idx)
+                remove_paths = set(remove_paths)
+                remove_indices = []
+                for idx in self.df.index:
+                    if self.df.iloc[idx]['path'] in remove_paths:
+                        remove_indices.append(idx)
 
-            self.df.drop(remove_indices, inplace=True)
-
+                self.df.drop(remove_indices, inplace=True)
+            elif config["dataset_name"] == "FAVC":
+                self.df = self.df[self.df['category'].isin(['A', 'D'])]
+            else:
+                raise ValueError("Wrong dataset_name!")
 
     def __len__(self):
         return len(self.df.index)
@@ -62,13 +81,22 @@ class AV1M_trainval_dataset(Dataset):
             video = feats['visual']
             audio = feats['audio']
         elif self.config["input_type"] == "audio":
-            audio = feats
-            video = -np.ones((video.shape[0], 1024)) * np.inf
+            try:
+                audio = feats['audio']
+            except:
+                audio = feats
+            video = -np.ones((audio.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "video":
-            video = feats
+            try:
+                video = feats['visual']
+            except:
+                video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
+        elif self.config["input_type"] == "multimodal":
+            video = feats["multimodal"]
+            audio = feats["multimodal"]
         else:
-            raise ValueError(f"input_type should be both, video or audio! Got: " + self.config["input_type"])
+            raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
@@ -91,24 +119,58 @@ class AV1M_test_dataset(Dataset):
             self.audio_feats = np.load(os.path.join(self.root_path, "audio.npy"), allow_pickle=True)
         if self.config["input_type"] == "both" or self.config["input_type"] == "video":
             self.video_feats = np.load(os.path.join(self.root_path, "video.npy"), allow_pickle=True)
+        if self.config["input_type"] == "multimodal":
+            self.video_feats = np.load(os.path.join(self.root_path, "multimodal.npy"), allow_pickle=True)
+            self.audio_feats = np.load(os.path.join(self.root_path, "multimodal.npy"), allow_pickle=True)
 
         self.labels = self._get_labels()
 
     def _get_labels(self):
-        df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv"))
+        if self.config["dataset_name"] == "AV1M":
+            df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv"))
 
-        if "fvfa_rvra_only" in self.config and self.config["fvfa_rvra_only"]:
-            with open(self.config["metadata_path"], "r") as f:
-                metadata = json.load(f)
+            if "fvfa_rvra_only" in self.config and self.config["fvfa_rvra_only"]:
+                with open(self.config["metadata_path"], "r") as f:
+                    metadata = json.load(f)
+
+                remove_paths = []
+                set_paths = set(df['path'].to_list())
+                for md in metadata:
+                    if md["file"] in set_paths:
+                        if (len(md['audio_fake_segments']) > 0 and len(md['visual_fake_segments']) > 0) or len(md['fake_segments']) == 0:
+                            continue
+                        else:
+                            remove_paths.append(md["file"])
+
+                remove_paths = set(remove_paths)
+                remove_indices = []
+                for idx, path in enumerate(self.paths):
+                    if path in remove_paths:
+                        remove_indices.append(idx)
+
+                self.paths = np.delete(self.paths, remove_indices)
+                if self.audio_feats is not None:
+                    self.audio_feats = np.delete(self.audio_feats, remove_indices)
+                if self.video_feats is not None:
+                    self.video_feats = np.delete(self.video_feats, remove_indices)
+
+                remove_indices = []
+                for idx in df.index:
+                    if df.iloc[idx]['path'] in remove_paths:
+                        remove_indices.append(idx)
+
+                df.drop(remove_indices, inplace=True)
+
+        elif self.config["dataset_name"] == "FAVC":
+            df = pd.read_csv(os.path.join(self.csv_root_path, "test_split.csv"))
+            df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
+            df['label'] = df['category'].map({'A': 0, 'D': 1})
 
             remove_paths = []
-            set_paths = set(df['path'].to_list())
-            for md in metadata:
-                if md["file"] in set_paths:
-                    if (len(md['audio_fake_segments']) > 0 and len(md['visual_fake_segments']) > 0) or len(md['fake_segments']) == 0:
-                        continue
-                    else:
-                        remove_paths.append(md["file"])
+            remove_paths.extend(INVALID_VIDS)
+            if "fvfa_rvra_only" in self.config and self.config["fvfa_rvra_only"]:
+                remove_paths.extend(df[~df['category'].isin(['A', 'D'])]['paths'].to_list())
+                df = df[df['category'].isin(['A', 'D'])]
 
             remove_paths = set(remove_paths)
             remove_indices = []
@@ -122,12 +184,8 @@ class AV1M_test_dataset(Dataset):
             if self.video_feats is not None:
                 self.video_feats = np.delete(self.video_feats, remove_indices)
 
-            remove_indices = []
-            for idx in df.index:
-                if df.iloc[idx]['path'] in remove_paths:
-                    remove_indices.append(idx)
-
-            df.drop(remove_indices, inplace=True)
+        else:
+            raise ValueError("Wrong dataset_name!")
 
         labels = {}
         for path in self.paths:
