@@ -67,7 +67,8 @@ if __name__ == "__main__":
     else:
         df = pd.read_csv(args.csv_file)
         if 'path' not in df.columns:
-            df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
+            df['path'] = df['full_file_path'].apply(lambda x: x.replace("/feats/", "/videos/"))
+            # df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
 
     if args.feats_extracted == "clip":
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -87,7 +88,12 @@ if __name__ == "__main__":
         dst = os.path.join(args.out_root_path, row['path'][:-4] + ".npy")
 
         if args.feats_extracted == "clip":
-            video_feats = load_clip(src, model, preprocess)
+            try:
+                video_feats = load_clip(src, model, preprocess)
+            except Exception as e:
+                print(e)
+                print(f"ERROR OOM: {src}")
+                continue
             if video_feats is None:
                 continue
             if args.test:

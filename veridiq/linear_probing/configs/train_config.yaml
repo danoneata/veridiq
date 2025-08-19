@@ -1,13 +1,14 @@
 data_info:
+  dataset_name: "AV1M"
   root_path: ""  # Data root path 
   csv_root_path: "/av_deepfake_1m/av_deepfake_1m/"  # Path to the folder containing split csv's
-  metadata_path: "/av_deepfake_1m/av_deepfake_1m/train_metadata.json"
+  metadata_path: "/av_deepfake_1m/av_deepfake_1m/train_metadata.json"  # only for AV1M; for FAVC comment this line
   fvfa_rvra_only: True
   apply_l2: True  # Apply l2 normalization of input features (always used in our experiments)
-  input_type: "both"  # both, video, audio (choose either to use both modalities or just one of them)
+  input_type: "both"  # both, video, audio, multimodal (choose either to use both modalities or just one of them)
 
 model_hparams:
-  input_type: "both"  # both, video, audio (choose either to use both modalities or just one of them)
+  input_type: "both"  # both, video, audio, multimodal (choose either to use both modalities or just one of them)
   feats_dim: 1024  # dimension of input feats
 
 callbacks:
