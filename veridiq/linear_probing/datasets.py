@@ -89,6 +89,8 @@ class AV1M_trainval_dataset(Dataset):
         elif self.config["input_type"] == "video":
             try:
                 video = feats['visual']
+                if len(video.shape) > 2:
+                    video = video.reshape(-1, video.shape[-1])
             except:
                 video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
@@ -166,10 +168,17 @@ class AV1M_test_dataset(Dataset):
             df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
             df['label'] = df['category'].map({'A': 0, 'D': 1})
 
+            ### PIECE OF COD FOR FAVC VIDEO-MAE TEST
+            # new_paths = []
+            # for path in self.paths:
+            #     path_cleaned = path.replace(" (", "_").replace(")", "")
+            #     new_paths.append(path_cleaned)
+            # self.paths = np.array(new_paths)
+
             remove_paths = []
             remove_paths.extend(INVALID_VIDS)
             if "fvfa_rvra_only" in self.config and self.config["fvfa_rvra_only"]:
-                remove_paths.extend(df[~df['category'].isin(['A', 'D'])]['paths'].to_list())
+                remove_paths.extend(df[~df['category'].isin(['A', 'D'])]['path'].to_list())
                 df = df[df['category'].isin(['A', 'D'])]
 
             remove_paths = set(remove_paths)
@@ -217,21 +226,156 @@ class AV1M_test_dataset(Dataset):
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
 
         label = self.labels[path]
+        if len(video.shape) > 2:
+            video = video.reshape(-1, video.shape[-1])
 
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, path  # video, audio, label, path
 
+
+class FakeAVCeleb_Dataset(Dataset):
+    def __init__(self, config, split):
+        self.config = config
+        self.split = split
+        self.root_path = self.config["root_path"]
+        self.csv_root_path = self.config["csv_root_path"]
+        self.input_type = self.config["input_type"]
+
+        labels = pd.read_csv(os.path.join(self.csv_root_path, f"{split}_split.csv"))
+        labels['path'] = labels['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
+        labels = labels[~labels['path'].isin(INVALID_VIDS)]
+
+        if "fvfa_rvra_only" in self.config and self.config["fvfa_rvra_only"]:
+            labels = labels[labels['category'].isin(['A', 'D'])]
+
+        self.features, self.paths = np.array([]), np.array([])
+
+        for folder_name in os.listdir(self.root_path):
+            feats = np.load(os.path.join(self.root_path, folder_name, f"{self.input_type}.npy"), allow_pickle=True)
+            self.features = np.concatenate((self.features, feats))
+
+            ps = np.load(os.path.join(self.root_path, folder_name, "paths.npy"), allow_pickle=True)
+            self.paths = np.concatenate((self.paths, ps))
+
+        self.useful_data = []
+        for idx in labels.index:
+            row = labels.loc[idx]
+            path = row['full_path'].replace("FakeAVCeleb/", "")
+            label = int(row['category'] != 'A')
+
+            for id_path in range(len(self.paths)):
+                if self.paths[id_path] == path:
+                    self.useful_data.append((id_path, label))
+                    break
+
+    def __len__(self):
+        return len(self.useful_data)
+
+    def __getitem__(self, idx):
+        id_path, label = self.useful_data[idx]
+        feats = self.features[id_path]
+        path = self.paths[id_path]
+
+        if "apply_l2" in self.config and self.config["apply_l2"]:
+            feats = feats / (np.linalg.norm(feats, ord=2, axis=-1, keepdims=True))
+        if len(feats.shape) > 2:
+            feats = feats.reshape(-1, feats.shape[-1])
+
+        return torch.tensor(feats), torch.tensor(feats), label, path  # video, audio, label, path
+
 ###### ######
+
+class PerFileDataset(Dataset):
+    def __init__(self, config):
+        self.config = config
+
+        self.root_path = self.config["root_path"]
+        self.csv_root_path = self.config["csv_root_path"]
+
+        self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
+        self.feats_dir = self.root_path
+        self.df['path'] = self.df['full_file_path']
+
+        self.df = self.df[self.df['original_split'] != "train"]
+        self.df = self.df[self.df["label"] != "unknown"]
+
+        if "files_to_remove" in config.keys():
+            with open(config["files_to_remove"], "r") as f:
+                self.files_to_remove = f.readlines()
+                self.files_to_remove = [v.replace("\n", "") for v in self.files_to_remove]
+
+            self.df = self.df[~self.df['path'].isin(self.files_to_remove)]
+
+    def __len__(self):
+        return len(self.df.index)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx].copy()
+        row['path'] = row['path'].replace("/feats/", "/videos/")
+
+        try:
+            feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz"), allow_pickle=True)
+        except FileNotFoundError:
+            try:
+                feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npy"), allow_pickle=True)
+            except FileNotFoundError:
+                feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz.npy"), allow_pickle=True)
+
+        if row["label"] == "real":
+            label = 0
+        elif row["label"] == "fake":
+            label = 1
+        else:
+            raise ValueError("only real or fake!")
+
+        if self.config["input_type"] == "both":
+            video = feats['visual']
+            audio = feats['audio']
+        elif self.config["input_type"] == "audio":
+            try:
+                audio = feats['audio']
+            except:
+                audio = feats
+            video = -np.ones((audio.shape[0], 1024)) * np.inf
+        elif self.config["input_type"] == "video":
+            try:
+                video = feats['visual']
+                if len(video.shape) > 2:
+                    video = video.reshape(-1, video.shape[-1])
+            except:
+                video = feats
+            audio = -np.ones((video.shape[0], 1024)) * np.inf
+        elif self.config["input_type"] == "multimodal":
+            video = feats["multimodal"]
+            audio = feats["multimodal"]
+        else:
+            raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
+
+        if "apply_l2" in self.config and self.config["apply_l2"]:
+            video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
+            audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+
+        return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
+
 
 def load_data(config, test=False):
     if test:
-        test_ds = AV1M_test_dataset(config)
+        if config["dataset_name"] == "FAVC_old":
+            test_ds = FakeAVCeleb_Dataset(config, split="test")
+        elif config["dataset_name"] == "BitDF":
+            test_ds = PerFileDataset(config)
+        else:
+            test_ds = AV1M_test_dataset(config)
         test_dl = DataLoader(test_ds, shuffle=False, batch_size=1)
 
         return test_dl
 
     else:
-        train_ds = AV1M_trainval_dataset(config, split="train")
-        val_ds = AV1M_trainval_dataset(config, split="val")
+        if config["dataset_name"] == "FAVC_old":
+            train_ds = FakeAVCeleb_Dataset(config, split="train")
+            val_ds = FakeAVCeleb_Dataset(config, split="val")
+        else:
+            train_ds = AV1M_trainval_dataset(config, split="train")
+            val_ds = AV1M_trainval_dataset(config, split="val")
 
         train_dl = DataLoader(train_ds, shuffle=True, batch_size=1)
         val_dl = DataLoader(val_ds, shuffle=False, batch_size=1)

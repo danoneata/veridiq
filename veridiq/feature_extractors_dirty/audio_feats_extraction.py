@@ -151,7 +151,12 @@ def load_wav2vec(path, vid_frames_no, feature_extractor):
         audio = torchaudio.transforms.Resample(orig_freq=sr, new_freq=SAMPLING_RATE)(audio)
     audio = audio.squeeze(0)
 
-    feature = extract1(audio, feature_extractor)
+    try:
+        feature = extract1(audio, feature_extractor)
+    except Exception as e:
+        print(e)
+        print(f"ERROR OOM: {path}")
+        return None
 
     # if split == "test":
     #     if len(feature) % 2 != 0:
@@ -203,7 +208,8 @@ if __name__ == "__main__":
     else:
         df = pd.read_csv(args.csv_file)
         if 'path' not in df.columns:
-            df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
+            df['path'] = df['full_file_path'].apply(lambda x: x.replace("/feats/", "/processed/"))
+            # df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
 
     if args.feats_extracted == "wav2vec":
         feature_type = WAV2VEC_MODEL_NAME
@@ -216,8 +222,8 @@ if __name__ == "__main__":
 
     for idx, row in tqdm.tqdm(df.iterrows()):
         src = os.path.join(args.in_root_path, row['path'][:-4] + ".wav")
-        vid_src = os.path.join(args.vid_root_path, row['path'][:-4] + ".mp4")
-        dst = os.path.join(args.out_root_path, row['path'][:-4] + ".npy")
+        vid_src = os.path.join(args.vid_root_path, row['path'].replace('/processed/', '/videos/')[:-4] + ".mp4")
+        dst = os.path.join(args.out_root_path, row['path'][:-4].replace('/processed/', '/videos/') + ".npy")
 
         frames_no = get_frames_no(vid_src)
 

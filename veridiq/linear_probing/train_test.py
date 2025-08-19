@@ -98,6 +98,8 @@ def test(config):
         "scores": all_scores,
         "labels": all_labels
     }).to_csv(os.path.join(config["output_path"], "results.csv"), index=False)
+    with open(os.path.join(config["output_path"], "tested_config.yaml"), "w") as f:
+        yaml.safe_dump(config, f)
 
     with open(os.path.join(config["output_path"], "eval_results.txt"), "w") as f:
         f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
