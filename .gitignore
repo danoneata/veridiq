@@ -1,3 +1,9 @@
 output
 __pycache__
 veridiq.egg-info/
+*.log
+*.out
+ckpts
+outputs
+train_config_*
+test_config_*

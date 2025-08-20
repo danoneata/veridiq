@@ -58,6 +58,15 @@ class AV1M_trainval_dataset(Dataset):
                 self.df.drop(remove_indices, inplace=True)
             elif config["dataset_name"] == "FAVC":
                 self.df = self.df[self.df['category'].isin(['A', 'D'])]
+
+                # for auto-avsr - remove missing (non)extracted features from the dataset
+                remove_paths = []
+                for idx in range(len(self.df)):
+                    row = self.df.iloc[idx]
+                    if not os.path.exists(os.path.join(self.feats_dir, row["path"][:-4] + ".npz")):
+                        remove_paths.append(row["path"])
+                if remove_paths:
+                    self.df = self.df[~self.df["path"].isin(remove_paths)].reset_index(drop=True)
             else:
                 raise ValueError("Wrong dataset_name!")
 
@@ -84,7 +93,10 @@ class AV1M_trainval_dataset(Dataset):
             try:
                 audio = feats['audio']
             except:
-                audio = feats
+                try:
+                    audio = feats['arr_0']
+                except:
+                    audio = feats
             video = -np.ones((audio.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "video":
             try:
@@ -92,13 +104,20 @@ class AV1M_trainval_dataset(Dataset):
                 if len(video.shape) > 2:
                     video = video.reshape(-1, video.shape[-1])
             except:
-                video = feats
+                try:
+                    video = feats['arr_0']
+                except:
+                    video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "multimodal":
             video = feats["multimodal"]
             audio = feats["multimodal"]
         else:
             raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
+
+        # videomae features have to be squeezed
+        if any(x in self.root_path for x in ("videomae", "video_mae", "video-mae")):
+            video = video.reshape(-1, video.shape[-1])
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
@@ -112,6 +131,7 @@ class AV1M_test_dataset(Dataset):
         self.config = config
         self.csv_root_path = self.config["csv_root_path"]
         self.root_path = config["root_path"]
+        self.trimmed = config["trimmed"]
 
         self.paths = np.load(os.path.join(self.root_path, "paths.npy"), allow_pickle=True)
         self.audio_feats = None
@@ -162,6 +182,11 @@ class AV1M_test_dataset(Dataset):
                         remove_indices.append(idx)
 
                 df.drop(remove_indices, inplace=True)
+
+                # for auto-avsr video - remove None features
+                mask = np.array([f is not None for f in self.video_feats])
+                self.paths = self.paths[mask]
+                self.video_feats = self.video_feats[mask]
 
         elif self.config["dataset_name"] == "FAVC":
             df = pd.read_csv(os.path.join(self.csv_root_path, "test_split.csv"))
@@ -228,6 +253,10 @@ class AV1M_test_dataset(Dataset):
         label = self.labels[path]
         if len(video.shape) > 2:
             video = video.reshape(-1, video.shape[-1])
+
+        if self.trimmed:
+            video = video[1:]
+            audio = audio[1:]
 
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, path  # video, audio, label, path
 
