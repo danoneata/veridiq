@@ -169,7 +169,6 @@ def extract_face_from_fixed_num_frames(src_video, dst_path, video_name, num_fram
     """
     video_capture = cv2.VideoCapture(src_video)
     total_frames = video_capture.get(7)
-
     # extract from the 1st(index 0) frame
     if num_frames is not None:
         frame_indices = get_frame_index_uniform_sample(total_frames, num_frames)
@@ -194,6 +193,19 @@ def extract_face_from_fixed_num_frames(src_video, dst_path, video_name, num_fram
     video_capture.release()
     cv2.destroyAllWindows()
 
+def replace_ethnicity(path: str) -> str:
+    replacements = {
+        "Caucasian_American": "Caucasian (American)",
+        "Asian_East": "Asian (East)",
+        "Asian_South": "Asian (South)",
+        "Caucasian_European": "Caucasian (European)"
+    }
+    
+    for old, new in replacements.items():
+        if old in path:
+            path = path.replace(old, new)
+    return path
+
 def main(
     split: str,
 ):
@@ -201,33 +213,46 @@ def main(
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     #get data
-    if split == "test":
-        file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/val/"
-        file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/test_labels.csv")
-        file_paths = file_paths["path"].tolist()
-    else:
-        file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/train/"
-        file_paths = pd.read_csv(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{split}_data.csv")
-        # num_frames = file_paths["num_frames"].tolist()
-        # file_paths = file_paths["path"].tolist()
-        # real + fake
-        # file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/train/"
-        # file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/{split}_labels.csv")
-        # num_frames = file_paths["num_frames"].tolist()
-        file_paths = file_paths["path"].tolist()
+    # AV1M
+    # if split == "test":
+    #     file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/val/"
+    #     file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/test_labels.csv")
+    #     file_paths = file_paths["path"].tolist()
+    # else:
+    #     file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/train/"
+    #     file_paths = pd.read_csv(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{split}_data.csv")
+    #     file_paths = file_paths["path"].tolist()
 
-    if split == "test":
-        save_path_root = f"/data/audio-video-deepfake-3/FSFM_face/test_face/"
-    else:
-        save_path_root = f"/data/audio-video-deepfake-3/FSFM_face/real_data_face/{split}/"
-    
-    # predictor_path = 'tools/shape_predictor_81_face_landmarks.dat'
-    # face_predictor = dlib.shape_predictor(predictor_path)
-    # idx = 9
-    # print(idx, 5000*(idx-1),5000*idx+1)
+    # if split == "test":
+    #     save_path_root = f"/data/audio-video-deepfake-3/FSFM_face/test_face/"
+    # else:
+    #     save_path_root = f"/data/audio-video-deepfake-3/FSFM_face/real_data_face/{split}/"
+
+    # FAVC
+    # file_paths_root = "/data/av-datasets/datasets/FakeAVCeleb/"
+    # file_paths = pd.read_csv(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/{split}_split.csv")
+    # file_paths = file_paths["full_path"].tolist()
+    # save_path_root = f"/data/av-extracted-features/favc_fsfm_preprocessed/"
+
+    # BitDF
+    file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
+    file_paths = pd.read_csv(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    file_paths = file_paths["full_file_path"].tolist()
+    save_path_root = f"/data/av-extracted-features/bitdf_fsfm_preprocessed/"
+
     for i, file_path in enumerate(tqdm(file_paths)): #[5000*(idx-1):5000*idx+1])):
-        in_file_path = file_paths_root + file_path
+        # file_path = file_path.replace("FakeAVCeleb/", "")
+        file_path = file_path.replace("/feats/", "/videos/")
         out_file_path = save_path_root + file_path
+
+        if "socialmedia" not in file_path:
+            continue
+        else:
+            file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
+
+        # file_path = replace_ethnicity(file_path)
+        
+        in_file_path = file_paths_root + file_path
         save_path = os.path.dirname(out_file_path) + "/"
         
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -236,8 +261,14 @@ def main(
         # if os.path.exists(save_path):
         #     continue
         
-        extract_face_from_fixed_num_frames(in_file_path, save_path, file_name, align=False)
+        # print(in_file_path, save_path)
+        # if "Africa" in save_path or "africa" in save_path:
+        #     continue
         
+        extract_face_from_fixed_num_frames(in_file_path, save_path, file_name, align=False)
 
 if __name__ == "__main__":
-    main("val")
+    main(None)
+    # main("train")
+    # main("val")
+    # main("test")
