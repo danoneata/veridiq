@@ -37,9 +37,11 @@ def cut_patch(img, landmarks, height, width, threshold=5):
     # Check for too much bias in height and width
     if abs(center_y - img.shape[0] / 2) > height + threshold:
         # raise Exception('too much bias in height')
-        return img
+        # return img
+        return cv2.resize(img, (width*2, height*2))
     if abs(center_x - img.shape[1] / 2) > width + threshold:
-        return img
+        # return img
+        return cv2.resize(img, (width*2, height*2))
         # raise Exception('too much bias in width')
     # Calculate bounding box coordinates
     y_min = int(round(np.clip(center_y - height, 0, img.shape[0])))

@@ -10,22 +10,7 @@ from tqdm import tqdm
 import csv
 import numpy as np
 import traceback
-
-def save2vid(filename, vid, frames_per_second):
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    # fps = float(frames_per_second)
-    fps = Fraction(frames_per_second).limit_denominator()
-    torchvision.io.write_video(filename, vid, fps)
-
-def preprocess_video(src_filename, dst_filename):
-    landmarks = landmarks_detector(src_filename)
-    data = dataloader.load_data(src_filename, landmarks)
-    
-    fps_raw = cv2.VideoCapture(src_filename).get(cv2.CAP_PROP_FPS)
-    fps = float(fps_raw) if fps_raw is not None else 25.0  # Default fallback
-    print("FPS:", fps, "Type:", type(fps))  # Debugging
-    
-    save2vid(dst_filename, data, fps)
+import ffmpeg
 
 class InferencePipeline(torch.nn.Module):
     def __init__(self, modality, model_path, model_conf, detector="mediapipe", face_track=False, device="cuda:0"):
@@ -64,11 +49,24 @@ class InferencePipeline(torch.nn.Module):
             print(e, " passing landmarks as None")
             landmarks = None
         data = self.dataloader.load_data(data_filename, landmarks)
+        
         with torch.no_grad():
             if isinstance(data, tuple):
                 enc_feats = self.model.model.encode(data[0].to(self.device), data[1].to(self.device), extract_resnet_feats)
             else:
                 enc_feats = self.model.model.encode(data.to(self.device), extract_resnet_feats)
+        
+                # in case of OOM, inference by chunks
+                # n = data.size()[1] #len(data)
+                # chunks = []
+                # # Split into 10 parts
+                # for i in range(10):
+                #     start = i * n // 10
+                #     end = (i + 1) * n // 10
+                #     chunk = self.model.model.encode(data[:, start:end].to(self.device), extract_resnet_feats)
+                #     chunks.append(chunk.cpu())  # move to CPU to free GPU
+                # # Concatenate all chunks along batch dimension
+                # enc_feats = torch.cat(chunks, dim=0)
         return enc_feats     
 
 def load_csv_paths(file_path):
@@ -76,7 +74,13 @@ def load_csv_paths(file_path):
     with open(file_path, mode='r') as file:
         reader = csv.DictReader(file)
         for row in reader:
-            paths.add(row['path'])  # assuming 'path' is the column name
+            try:
+                paths.add(row['path'])  # assuming 'path' is the column name
+            except KeyError:
+                try:
+                    paths.add(row['full_path'])  # assuming 'full_path' is the column name
+                except KeyError:
+                    paths.add(row['full_file_path'])  # assuming 'full_path' is the column name
     return paths
 
 def get_machine_indices(machine_id, start_idx=0, end_idx=50000, num_machines=1):
@@ -88,76 +92,77 @@ def get_machine_indices(machine_id, start_idx=0, end_idx=50000, num_machines=1):
     
     return start_index, end_index
 
-if __name__ == "__main__":
+def main(split):
     # machine_id = 4
     # print(f"Machine id {machine_id}")
-    SPLIT = "train"
+    SPLIT = split #"train"
     print("Split: ", SPLIT)
     None_counter = 0
 
-    modality = "audio"
-    model_conf = "LRS3_A_WER1.0/model.json"  
-    model_path = "LRS3_A_WER1.0/model.pth"
+    modality = "video"
+    model_conf = "LRS2_V_WER26.1/model.json"  
+    model_path = "LRS2_V_WER26.1/model.pth"
     pipeline = InferencePipeline(modality, model_path, model_conf, face_track=True)
 
-    path_to_features_root = f"/data/audio-video-deepfake/ASR_features/LRS3_A_WER1.0/real+fake/{SPLIT}/"
+    path_to_features_root = f"/data/av-extracted-features/bitdf_auto_avsr/{modality}/"
     print(f"Saving at {path_to_features_root}")
-    path_to_crops = f"/data/audio-video-deepfake/ASR/preprocessed/real+fake/{SPLIT}/"
+    if modality == "audio":
+        path_to_crops = f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/" # get audio (.wav)
+    else:
+        path_to_crops = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
 
-    # csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/av_deepfake_1m/{SPLIT}_labels.csv")
-    csv2_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv')
-    files = sorted(list(csv2_paths))#.union(csv2_paths)))
-
-    # files = ["id00017/OLguY5ofUrY/00043/real.mp4", "id00064/MnBv-hDLPWo/00259/real.mp4"]
+    csv1_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    # csv2_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv')
+    files = sorted(list(csv1_paths))#.union(csv2_paths)))
 
     # files = sorted([os.path.join(dp, f) for dp, dn, filenames in os.walk(VIDEOS_PATH) for f in filenames])
     # print(len(files))
     # start_index, end_index = get_machine_indices(machine_id, end_idx = len(files)+2, num_machines=5)
     # print(start_index, end_index)
 
-    # landmarks_detector = LandmarksDetector()
-    # dataloader = AVSRDataLoader(modality="video", speed_rate=1, transform=False, detector="mediapipe", convert_gray=False)
     for i, file_path in enumerate(tqdm(files)): #[start_index:end_index])):
-        original_video_path = "/data/av-deepfake-1m/av_deepfake_1m/train/" + file_path
-        # mouth_roi_path = original_video_path[:-4] + '_roi.mp4'
+        # file_path = file_path.replace("FakeAVCeleb/", "")
+        file_path = file_path.replace("/feats/", "/videos/")
+        
+        if modality == "audio":
+            file_path = file_path.replace(".mp4", ".wav").replace("/videos/", "/processed/")
+            mouth_roi_path = os.path.join(path_to_crops, file_path)
+            save_path = os.path.join(path_to_features_root, file_path.replace(".wav", ".npz"))
+        else:
+            mouth_roi_path = os.path.join(path_to_crops, file_path)
+            save_path = os.path.join(path_to_features_root, file_path.replace(".mp4", ".npz"))
 
-        save_path = os.path.join(path_to_features_root, file_path.replace(".mp4", ".npz"))
         if os.path.isfile(save_path):
-            # continue
-            x = np.load(save_path, allow_pickle=True)
-            if x['audio'].any() != None:
-                continue
+            continue
 
-        mouth_roi_path = path_to_crops + file_path
-        # audio_path = original_video_path[:-4] + '.wav'
-        # mouth_roi_path = mouth_roi_path.replace("/data/av1m-test/unzipped/test/", "/data/av1m-test-feats/preprocessed/")
-        # audio_path = audio_path.replace("/data/av1m-test/unzipped/test/", "/data/av1m-test-feats/preprocessed/")
+        if "socialmedia" not in file_path:
+            continue
+        # else:
+        #     file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
 
         try:
-            # feature_vid = pipeline.extract_features(mouth_roi_path)
-            # feature_vid = feature_vid.cpu().detach().numpy()
-            feature_audio = pipeline.extract_features(original_video_path)
-            feature_audio = feature_audio.cpu().detach().numpy()
+            # if there are not .wav extracted yet (or a few missing)
+            # if not os.path.exists(mouth_roi_path) and modality=="audio":
+            #     og_path = os.path.join(f"/data/veridiq-shared-pg/dataset/filtered_tracks/", file_path.replace("/processed/", "/videos/").replace(".wav", ".mp4"))
+            #     ffmpeg.input(og_path).output(mouth_roi_path).run()
+            #     print("used ffmpeg ", mouth_roi_path)
+            feature = pipeline.extract_features(mouth_roi_path)
+            feature = feature.cpu().detach().numpy()
+
         except Exception as e:
             print(e)
-            # feature_vid = None
             None_counter += 1
-            feature_audio = None
-            # None_counter += 1
-            # print(feature_vid)
-            print(feature_audio)
             traceback.print_exc()
-        
-        save_dict = {
-            # "visual": feature_vid,
-            "audio": feature_audio,
-            "path": file_path,
-        }
-        # save_path = os.path.join(path_to_features_root, file_path.replace(".mp4", ".npz"))
+            continue
+
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        
-        np.savez(save_path, **save_dict)
-        # with open(os.path.join(PATH_TO_FEATURES, os.path.join(PATH_TO_FEATURES, os.path.basename(original_video_path).replace(".mp4", ".pkl"))), 'wb') as f:
-        #     pickle.dump(save_dict, f)
-    
+        np.savez(save_path, feature)
+
     print("none counter: ", None_counter)
+
+if __name__ == "__main__":
+    main(None)
+    # main("train")
+    # main("val")
+    # main("test")
+    

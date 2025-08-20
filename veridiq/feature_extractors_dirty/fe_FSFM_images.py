@@ -14,8 +14,12 @@ from torch.utils.data import DataLoader, Dataset
 
 from transformers import AutoProcessor, AutoModelForCausalLM
 
-import models_vit
 from huggingface_hub import hf_hub_download
+
+# to be replaced
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'fsfm')))
+import models_vit
 
 class VideoDataset(Dataset):
     def __init__(self, video_paths, preprocess, frame_interval=1):
@@ -133,28 +137,44 @@ def main(
 
 
     #get data
-    if split == "test":
-        # file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/val/"
-        file_paths_root = "/data/audio-video-deepfake/FSFM_face/test_face/"
-        file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/test_labels.csv")
-        file_paths = file_paths["path"].tolist()
-    else:
-        file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/train/"
-        file_paths_root = f"/data/audio-video-deepfake/FSFM_face/real_data_face/{split}/"
-        file_paths = pd.read_csv(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{split}_data.csv")
-        # num_frames = file_paths["num_frames"].tolist()
-        # file_paths = file_paths["path"].tolist()
-        # real+fake
-        # file_paths_root = f"/data/audio-video-deepfake/FSFM_face/real+fake_data_face/{split}/"
-        # file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/{split}_labels.csv")
-        # num_frames = file_paths["num_frames"].tolist()
-        file_paths = file_paths["path"].tolist()
 
-    if split == "test":
-        save_path_root = f"/data/audio-video-deepfake-3/FSFM_face_features/test_face_fix/"
-    else:
-        save_path_root = f"/data/audio-video-deepfake-3/FSFM_face_features/real_data_face/{split}/"
+    # AV1M
+    # if split == "test":
+    #     # file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/val/"
+    #     file_paths_root = "/data/audio-video-deepfake/FSFM_face/test_face/"
+    #     file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/test_labels.csv")
+    #     file_paths = file_paths["path"].tolist()
+    # else:
+    #     file_paths_root = "/data/av-deepfake-1m/av_deepfake_1m/train/"
+    #     file_paths_root = f"/data/audio-video-deepfake/FSFM_face/real_data_face/{split}/"
+    #     file_paths = pd.read_csv(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{split}_data.csv")
+    #     # num_frames = file_paths["num_frames"].tolist()
+    #     # file_paths = file_paths["path"].tolist()
+    #     # real+fake
+    #     # file_paths_root = f"/data/audio-video-deepfake/FSFM_face/real+fake_data_face/{split}/"
+    #     # file_paths = pd.read_csv(f"/data/av-deepfake-1m/av_deepfake_1m/{split}_labels.csv")
+    #     # num_frames = file_paths["num_frames"].tolist()
+    #     file_paths = file_paths["path"].tolist()
 
+    # if split == "test":
+    #     save_path_root = f"/data/audio-video-deepfake-3/FSFM_face_features/test_face_fix/"
+    # else:
+    #     save_path_root = f"/data/audio-video-deepfake-3/FSFM_face_features/real_data_face/{split}/"
+
+    # FAVC
+    # file_paths_root = f"/data/av-extracted-features/favc_fsfm_preprocessed/"
+    # file_paths = pd.read_csv(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/{split}_split.csv")
+    # file_paths = file_paths["full_path"].tolist()
+    # save_path_root = f"/data/av-extracted-features/favc_fsfm/"
+
+    # BitDF
+    file_paths_root = f"/data/av-extracted-features/bitdf_fsfm_preprocessed/"
+    file_paths = pd.read_csv(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    file_paths = file_paths["full_file_path"].tolist()
+    save_path_root = f"/data/av-extracted-features/bitdf_fsfm/"
+
+
+    os.makedirs(os.path.dirname(save_path_root), exist_ok=True)
     all_video_features = []
     all_paths = []
     # dataset = VideoDataset(file_paths, preprocess)
@@ -183,11 +203,21 @@ def main(
     # idx = 7
     # print(idx, 6500*(idx-1),6500*idx+1)
     for i, file_path in enumerate(tqdm(file_paths)): #[6500*(idx-1):6500*idx+1])):
+        if i < 6000:
+            continue
         # file_path = file_path.replace(".mp4", "_roi.mp4")
+        # file_path = file_path.replace("FakeAVCeleb/", "")
+        file_path = file_path.replace("/feats/", "/videos/")
         save_path = save_path_root + file_path.replace(".mp4", ".npz")
         if os.path.exists(save_path):
             continue
         
+        # if "socialmedia" not in file_path:
+        #     continue
+        # else:
+        #     file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
+
+
         in_file_path =  file_paths_root + file_path
         frames = load_video_frames(in_file_path, transform)
         frames = frames.to(device)
@@ -199,7 +229,7 @@ def main(
         #     features_i = features_i.cpu().detach()
         #     features_list.append(features_i)
         
-        chunk_size = 32
+        chunk_size = 64
         features_list = []
         for i in range(0, len(frames), chunk_size):
             frames_i = frames[i: i+chunk_size]  # Take a chunk of 64 frames (or less if at the end)
@@ -225,10 +255,12 @@ def main(
         print(save_path_root)
 
     if split == 'test':
-        os.makedirs(os.path.dirname(save_path_root), exist_ok=True)
         all_video_features = np.array(all_video_features, dtype=object)
         np.save(os.path.join(save_path_root, "video.npy"), all_video_features)
         np.save(os.path.join(save_path_root, "paths.npy"), all_paths)
         
 if __name__ == "__main__":
-    main("val")
+    main(None)
+    # main("train")
+    # main("val")
+    # main("test")

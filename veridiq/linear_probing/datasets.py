@@ -115,10 +115,6 @@ class AV1M_trainval_dataset(Dataset):
         else:
             raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
 
-        # videomae features have to be squeezed
-        if any(x in self.root_path for x in ("videomae", "video_mae", "video-mae")):
-            video = video.reshape(-1, video.shape[-1])
-
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
@@ -363,7 +359,10 @@ class PerFileDataset(Dataset):
             try:
                 audio = feats['audio']
             except:
-                audio = feats
+                try:
+                    audio = feats['arr_0']
+                except:
+                    audio = feats
             video = -np.ones((audio.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "video":
             try:
@@ -371,7 +370,10 @@ class PerFileDataset(Dataset):
                 if len(video.shape) > 2:
                     video = video.reshape(-1, video.shape[-1])
             except:
-                video = feats
+                try:
+                    video = feats['arr_0']
+                except:
+                    video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "multimodal":
             video = feats["multimodal"]
