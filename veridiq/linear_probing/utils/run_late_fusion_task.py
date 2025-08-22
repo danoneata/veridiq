@@ -11,8 +11,8 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 if __name__ == "__main__":
     models_to_run = ["clip", "wav2vec", "video_mae", "avh_audio", "avh_video"]
-    root_path = ""
-    dst_path = ""
+    root_path = "/mnt/results_uni_multi_modal/outputs/"
+    dst_path = "/root/veridiq/veridiq/linear_probing/outputs/results_correlation/"
 
     path_list = glob.glob(os.path.join(root_path, "**", models_to_run[0]), recursive=True)
     path_list = [os.path.dirname(x).replace(root_path, "") for x in path_list]
@@ -66,8 +66,10 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap.png"))
         plt.clf()
 
-        results_auc_diff = results_auc - np.diag(results_auc)[:, np.newaxis]
-        results_ap_diff = results_ap - np.diag(results_ap)[:, np.newaxis]
+        diag_auc = np.diag(results_auc)[:, np.newaxis]
+        results_auc_diff = results_auc - diag_auc
+        diag_ap = np.diag(results_ap)[:, np.newaxis]
+        results_ap_diff = results_ap - diag_ap
         sns.heatmap(results_auc_diff, vmin=-0.5, vmax=0.5, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_auc_diff.png"))
         plt.clf()
@@ -75,11 +77,11 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap_diff.png"))
         plt.clf()
 
-        results_auc_diff_per = (results_auc_diff / results_auc) * 100
-        results_ap_diff_per = (results_ap_diff / results_ap) * 100
-        sns.heatmap(results_auc_diff_per, vmin=-50, vmax=50, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        results_auc_diff_per = (results_auc_diff / diag_auc)
+        results_ap_diff_per = (results_ap_diff / diag_ap)
+        sns.heatmap(results_auc_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_auc_diff_per.png"))
         plt.clf()
-        sns.heatmap(results_ap_diff_per, vmin=-50, vmax=50, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_ap_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap_diff_per.png"))
         plt.clf()
