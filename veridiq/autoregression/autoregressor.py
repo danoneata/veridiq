@@ -159,7 +159,7 @@ class AutoregressorHead(L.LightningModule):
 
         return output
 
-    def predict_scores(self, video_feats, audio_feats, masks, labels, test_level):
+    def predict_scores(self, video_feats, audio_feats, masks):
 
         features = torch.cat((video_feats, audio_feats), dim=-1)
         masks = masks[:, 1:]
@@ -170,15 +170,9 @@ class AutoregressorHead(L.LightningModule):
         output = self.forward(features[:, :-1, :], masks)
         mse_loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
 
-        if test_level == "video_level":
-            mse_loss, _ = torch.max(mse_loss.mean(dim=-1), dim=-1)
-        elif test_level == "frame_level":
-            mse_loss = mse_loss.mean(dim=-1).view(-1)
-            labels = labels[:, 1:].view(-1)
-        else:
-            raise ValueError("Wrong test level. Expected: video_level/frame_level; Got: " + test_level)
+        mse_loss, _ = torch.max(mse_loss.mean(dim=-1), dim=-1)  # TODO: try multiple versions
 
-        return mse_loss, labels
+        return mse_loss
 
     def training_step(self, batch, batch_idx):
         video_feats, audio_feats, masks, _, _ = batch
