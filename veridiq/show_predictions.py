@@ -51,6 +51,12 @@ FEATURES_DIR = {
     "VideoMAE": Path("/data/audio-video-deepfake-2/Video_MAE_large/test"),
 }
 
+SUBSAMPLING_FACTORS = {
+    "CLIP": 1,
+    "FSFM": 1,
+    "VideoMAE": 2,
+}
+
 
 class FeatureExtractor(ABC, nn.Module):
     """Abstract base class for feature extractors."""
@@ -328,8 +334,8 @@ def get_label(datum):
 FPS = 25
 
 
-def time_to_index(time):
-    return int(time * FPS)
+def time_to_index(time, subsampling_factor=1):
+    return int(time * FPS / subsampling_factor)
 
 
 def index_to_time(index, subsampling_factor=1):
@@ -342,7 +348,7 @@ def eval_video_level(preds_video, metadata):
     return roc_auc_score(true, pred)
 
 
-def get_per_frame_labels(datum):
+def get_per_frame_labels_default(datum):
     n = datum["video_frames"]
     labels = np.zeros(n)
     for s, e in datum["fake_segments"]:
@@ -352,24 +358,66 @@ def get_per_frame_labels(datum):
     return labels
 
 
-def eval_per_video(preds, metadata):
+def get_per_frame_labels_video_mae(datum):
+    chunk_size = 16
+    stride_size = 16
+    num_features = 8
+    subsampling_factor = 2
+
+    n = datum["video_frames"]
+    n = (n - chunk_size) // stride_size + 1
+    n = n * num_features
+    labels = np.zeros(n)
+
+    for s, e in datum["fake_segments"]:
+        s = time_to_index(s, subsampling_factor)
+        e = time_to_index(e, subsampling_factor)
+        labels[s:e] = 1
+
+    return labels
+
+
+GET_PER_FRAME_LABELS = {
+    "CLIP": get_per_frame_labels_default,
+    "FSFM": get_per_frame_labels_default,
+    "VideoMAE": get_per_frame_labels_video_mae,
+}
+
+
+def eval_per_video(preds, metadata, feature_extractor_type, to_binarize=True):
+    def get_pred(pred):
+        if to_binarize:
+            return pred_to_proba(pred) > 0.5
+        else:
+            return pred
+
+    get_per_frame_labels = GET_PER_FRAME_LABELS[feature_extractor_type]
+
     def eval1(pred, datum):
-        pred = pred_to_proba(pred) > 0.5
+        pred = get_pred(pred)
         true = get_per_frame_labels(datum)
+
         n_pred = len(pred)
         n_true = len(true)
+
         diff = abs(n_pred - n_true)
+
         if diff > 2:
             print(diff)
+            # print(n_pred)
+            # print(n_true)
             print(datum)
             print()
-            # pdb.set_trace()
-            return 0
-        else:
-            n = min(n_pred, n_true)
-            true = true[:n]
-            pred = pred[:n]
-            return roc_auc_score(true, pred)
+            return None
+
+        n = min(n_pred, n_true)
+        true1 = true[:n]
+        pred1 = pred[:n]
+
+        if sum(true1) == 0:
+            return None
+
+        return roc_auc_score(true1, pred1)
 
     return [eval1(p, m) for p, m in zip(preds, metadata)]
 
@@ -392,8 +440,7 @@ def select_rvra_or_fvfa(preds, metadata):
 
 
 def get_prediction_figure(preds, datum, feature_extractor_type="CLIP"):
-    subsampling_factors = {"CLIP": 1, "FSFM": 1, "VideoMAE": 2}
-    subsampling_factor = subsampling_factors[feature_extractor_type]
+    subsampling_factor = SUBSAMPLING_FACTORS[feature_extractor_type]
 
     def show_fake_segment(ax, fake_segment):
         s = fake_segment[0]
@@ -637,6 +684,9 @@ def get_predictions_path(feature_extractor_type):
 
 
 def show_temporal_explanations():
+    def argsort_with_none(xs, none_value):
+        return np.argsort([x if x is not None else none_value for x in xs])
+
     SELECTIONS = {
         "first": lambda n: range(n),
         "random": lambda n: random.sample(range(num_videos), n),
@@ -644,8 +694,8 @@ def show_temporal_explanations():
         "highest-preds": lambda n: np.argsort(preds_video)[-n:],
         "lowest-preds": lambda n: np.argsort(preds_video)[:n],
         # videos that are best or worst according to the video-level scores
-        # "best": lambda n: np.argsort(scores_video)[-n:],
-        # "worst": lambda n: np.argsort(scores_video)[:n],
+        "best": lambda n: argsort_with_none(scores_video, -np.inf)[-n:],
+        "worst": lambda n: argsort_with_none(scores_video, +np.inf)[:n],
     }
 
     with st.sidebar:
@@ -690,7 +740,13 @@ def show_temporal_explanations():
 
     auc = eval_video_level(preds_video, metadata)
     # feats, _ = select_rvra_or_fvfa(features0, metadata0)
-    # scores_video = eval_per_video(preds, metadata)
+
+    scores_video = eval_per_video(
+        preds,
+        metadata,
+        feature_extractor_type=feature_extractor_type,
+        to_binarize=False,
+    )
 
     num_videos = len(preds)
     st.markdown("num. of selected videos: {}".format(num_videos))
@@ -788,6 +844,7 @@ def show_frames_classifier_maximization():
     preds, metadata = select_rvra_or_fvfa(preds, metadata0)
     num_videos = len(preds)
     to_maximize = maximize == "Highest scores"
+    subsampling_factor = SUBSAMPLING_FACTORS[feature_extractor_type]
 
     def get_frame_data_1(i):
         pred = preds[i]
@@ -827,7 +884,7 @@ def show_frames_classifier_maximization():
         frame_idx = frame_data["frame_idx"]
 
         datum = metadata[video_idx]
-        labels = get_per_frame_labels(datum)
+        labels = get_per_frame_labels(datum, subsampling_factor)
         label = labels[frame_idx]
         label_str = "fake" if label == 1 else "real" if label == 0 else "unknown"
 
