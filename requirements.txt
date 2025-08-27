@@ -14,3 +14,4 @@ opencv-python
 streamlit
 timm
 grad-cam
+h5py

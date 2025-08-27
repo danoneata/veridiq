@@ -16,13 +16,6 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from toolz import take, partition_all
 from tqdm import tqdm
 
-from transformers import (
-    CLIPModel,
-    CLIPProcessor,
-    VideoMAEImageProcessor,
-    VideoMAEModel,
-)
-from huggingface_hub import hf_hub_download
 
 import cv2
 import numpy as np
@@ -31,14 +24,13 @@ import torch
 
 from torch import nn
 from torch.nn import Module
-from torchvision import transforms
 
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
 
 from veridiq.data import AV1M
+from veridiq.extract_features import FeatureExtractor, load_video_frames
 from veridiq.utils import cache_json, cache_np, implies
-import veridiq.fsfm.models_vit
 import veridiq.mymarkdown as md
 
 
@@ -55,160 +47,6 @@ SUBSAMPLING_FACTORS = {
     "CLIP": 1,
     "FSFM": 1,
     "VideoMAE": 2,
-}
-
-
-class FeatureExtractor(ABC, nn.Module):
-    """Abstract base class for feature extractors."""
-
-    def __init__(self):
-        super().__init__()
-        self.feature_dim = None
-
-    @abstractmethod
-    def transform(self, x):
-        """Transform input images for the model."""
-        pass
-
-    @abstractmethod
-    def get_image_features(self, x):
-        """Extract features from transformed images."""
-        pass
-
-    def forward(self, x):
-        return self.get_image_features(x)
-
-
-class CLIP(FeatureExtractor):
-    def __init__(self, model_id, tokens, layer):
-        super().__init__()
-
-        assert tokens in ["CLS", "patches"]
-        assert implies(layer == "post-projection", tokens == "CLS")
-
-        self.model = CLIPModel.from_pretrained(model_id).eval()
-        self.processor = CLIPProcessor.from_pretrained(model_id)
-
-        self.model.to(DEVICE)
-        self.model.eval()
-
-        if layer == "post-projection":
-            self.feature_dim = self.model.config.projection_dim
-            self.get_image_features = self.get_image_features_post_projection
-        else:
-            self.feature_dim = self.model.config.vision_config.hidden_size
-            self.get_image_features = partial(
-                self.get_image_features_pre_projection,
-                tokens=tokens,
-                layer=layer,
-            )
-
-    def transform(self, x):
-        output = self.processor(images=x, return_tensors="pt")
-        output = output["pixel_values"]
-        # output = output.squeeze(0)
-        return output
-
-    def get_image_features(self, x):
-        # This method is required to satisfy the abstract base class.
-        # It will be replaced by the appropriate method in __init__.
-        raise NotImplementedError("get_image_features is set dynamically in __init__")
-
-    def get_image_features_pre_projection(self, x, tokens, layer):
-        outputs = self.model.vision_model(x, output_hidden_states=True)
-        outputs = outputs.hidden_states[layer]
-        outputs = outputs[:, :1] if tokens == "CLS" else outputs[:, 1:]
-        outputs = outputs.mean(1)
-        return outputs
-
-    def get_image_features_post_projection(self, x):
-        return self.model.get_image_features(x)
-
-    def forward(self, x):
-        return self.get_image_features(x)
-
-
-class FSFM(FeatureExtractor):
-    def __init__(self):
-        super().__init__()
-        self.model = self.load_model()
-        self.transform1 = transforms.Compose(
-            [
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                ),
-            ]
-        )
-
-    def load_model(self):
-        CKPT_NAME = "finetuned_models/FF++_c23_32frames/checkpoint-min_val_loss.pth"
-        CKPT_SAVE_PATH = "output/fsfm"
-        hf_hub_download(
-            repo_id="Wolowolo/fsfm-3c",
-            filename=CKPT_NAME,
-            local_dir=CKPT_SAVE_PATH,
-        )
-
-        model = veridiq.fsfm.models_vit.vit_base_patch16(
-            global_pool="avg",
-            num_classes=2,
-        )
-        checkpoint = torch.load(
-            os.path.join(CKPT_SAVE_PATH, CKPT_NAME),
-            map_location="cpu",
-            weights_only=False,
-        )
-        model.load_state_dict(checkpoint["model"])
-
-        model.head = torch.nn.Identity()
-        model.head_drop = torch.nn.Identity()
-
-        model = model.to(DEVICE)
-        model.eval()
-
-        return model
-
-    def transform(self, x):
-        # Convert images to the format expected by the model.
-        # The model expects images of shape (B, 3, 224, 224).
-        x = [self.transform1(Image.fromarray(image)) for image in x]
-        x = torch.stack(x, dim=0)
-        return x.to(DEVICE)
-
-    def get_image_features(self, x):
-        return self.model.forward_features(x)
-
-
-class VideoMAE(FeatureExtractor):
-    def __init__(self, model_id):
-        super().__init__()
-        path = "MCG-NJU/videomae-large"
-        self.processor = VideoMAEImageProcessor.from_pretrained(path)
-        self.model = VideoMAEModel.from_pretrained(path)
-
-        self.model.to(DEVICE)
-        self.model.eval()
-
-    def transform(self, x):
-        # Convert images to the format expected by the model.
-        x = [Image.fromarray(image) for image in x]
-        return self.model.preprocess(x)
-
-    def get_image_features(self, x):
-        return self.model.forward_features(x)
-
-
-FEATURE_EXTRACTORS = {
-    "CLIP": lambda: CLIP(
-        "openai/clip-vit-large-patch14",
-        tokens="CLS",
-        layer="post-projection",
-    ),
-    "FSFM": lambda: FSFM(),
-    # "VideoMAE": lambda: VideoMAE("MCG-NJU/videomae-large"),
 }
 
 
@@ -234,16 +72,9 @@ class FullModel(Module):
         return x
 
 
-def load_video_frames(datum):
+def load_video_frames_datum(datum):
     video_path = DATASET.get_video_path(datum["file"])
-    capture = cv2.VideoCapture(str(video_path))
-    while True:
-        ret, frame = capture.read()
-        if not ret:
-            break
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        yield frame
-    capture.release()
+    return load_video_frames
 
 
 def pred_to_proba(score):

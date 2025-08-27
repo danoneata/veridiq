@@ -15,32 +15,40 @@ class AV1M:
     def load_filelist(self):
         path = self.root / f"{self.split}_metadata.json"
         with open(path, "r") as f:
-            return json.load(f)
+            return json.load(fm)
 
     def get_video_path(self, file):
         path = self.root / self.split / file
         return str(path)
 
 
-
 class ExDDV:
-    def __init__(self, split):
+    def __init__(self):
         pass
 
     def load_metadata(self):
-        path = Path("/root/work/exddv/ExDDV.csv")
-        return pd.read_csv(path)
+        df_reals = pd.read_csv("data/exddv/ExDDV_reals_FF++.csv")
+        df_fakes = pd.read_csv("data/exddv/ExDDV_with_full_path.csv")
+        return {"real": df_reals, "fake": df_fakes}
 
+    def get_video_paths(self) -> list:
+        metadata = self.load_metadata()
+        paths_real = [row.full_path for row in metadata["real"].itertuples()]
+        paths_fake = [row.full_path for row in metadata["fake"].itertuples()]
+        paths = paths_real + paths_fake
+        paths = ["/data" + path for path in paths]
+        return paths
 
 
 DATASETS = {
+    # "fakeavceleb": FakeAVCeleb,
     "av1m": AV1M,
     "exddv": ExDDV,
 }
 
 
 if __name__ == "__main__":
-    # import streamlit as st
+    import streamlit as st
 
     # dataset = AV1M("val")
     # data = dataset.load_filelist()
@@ -57,6 +65,8 @@ if __name__ == "__main__":
 
     dataset = ExDDV("val")
     metadata = dataset.load_metadata()
-    print(metadata.columns)
-    pdb.set_trace()
-    metadata.groupby("movie_name").apply(func)
+    for row in metadata["real"].sample(10).itertuples():
+        st.write(row)
+        st.video(row.full_path)
+    # print(metadata.columns)
+    # metadata.groupby("movie_name").apply(func)
