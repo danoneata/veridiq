@@ -5,8 +5,6 @@ import pdb
 
 import pandas as pd
 
-from torch.utils.data import Dataset
-
 
 class AV1M:
     def __init__(self, split):
@@ -24,37 +22,30 @@ class AV1M:
         return str(path)
 
 
-class ExDDV(Dataset):
-    def __init__(self, split):
-        self.split = split
-
+class ExDDV:
     @staticmethod
     def load_metadata():
         df_reals = pd.read_csv("data/exddv/ExDDV_reals_FF++.csv")
-        df_reals["video-name"] = "real/" + df_reals["movie_name"]
-        df_reals["video-path"] = "/data" + df_reals["full_path"]
+        df_reals["name"] = "real/" + df_reals["movie_name"]
+        df_reals["path"] = "/data" + df_reals["full_path"]
+        df_reals["label"] = "real"
 
         df_fakes = pd.read_csv("data/exddv/ExDDV_with_full_path.csv")
-        df_fakes["video-name"] = df_fakes["dataset"] + "/" + df_fakes["movie_name"]
-        df_fakes["video-path"] = "/data" + df_fakes["full_path"]
+        df_fakes["name"] = df_fakes["dataset"] + "/" + df_fakes["movie_name"]
+        df_fakes["path"] = "/data" + df_fakes["full_path"]
+        df_fakes["label"] = "fake"
 
         return df_reals, df_fakes
 
     @staticmethod
-    def get_videos() -> list:
+    def get_videos() -> list[dict]:
         df_reals, df_fakes = ExDDV.load_metadata()
 
-        cols = ["video-name", "video-path"]
+        cols = ["name", "path", "split", "label"]
         videos_fake = df_fakes[cols].to_dict(orient="records")
         videos_real = df_reals[cols].to_dict(orient="records")
 
         return videos_fake + videos_real
-
-    def __len__(self):
-        pass
-
-    def __getitem__(self, i):
-        pass
 
 
 

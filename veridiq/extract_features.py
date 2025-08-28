@@ -28,7 +28,7 @@ from veridiq.utils import implies
 
 
 DEVICE = "cuda"
-OUT_DIR = Path("/data/deepfake-features")
+FEATURE_DIR = Path("/data/deepfake-features")
 
 
 def load_video_frames(video_path: str):
@@ -233,7 +233,7 @@ def main(dataset_name, feature_name):
     dataset = DATASETS[dataset_name]
     feature_extractor = FEATURE_EXTRACTORS[feature_name]()
 
-    path = OUT_DIR / dataset_name / (feature_name + ".h5")
+    path = FEATURE_DIR / dataset_name / (feature_name + ".h5")
     path.parent.mkdir(parents=True, exist_ok=True)
 
     videos = dataset.get_videos()
@@ -245,8 +245,8 @@ def main(dataset_name, feature_name):
 
             group = f.create_group(video["name"])
             group.create_dataset("features", data=features)
-            group.attrs["video-name"] = video["name"]
-            group.attrs["video-path"] = video["path"]
+            group.attrs["name"] = video["name"]
+            group.attrs["path"] = video["path"]
 
 
 if __name__ == "__main__":
