@@ -5,6 +5,8 @@ import pdb
 
 import pandas as pd
 
+from torch.utils.data import Dataset
+
 
 class AV1M:
     def __init__(self, split):
@@ -15,29 +17,45 @@ class AV1M:
     def load_filelist(self):
         path = self.root / f"{self.split}_metadata.json"
         with open(path, "r") as f:
-            return json.load(fm)
+            return json.load(f)
 
     def get_video_path(self, file):
         path = self.root / self.split / file
         return str(path)
 
 
-class ExDDV:
-    def __init__(self):
+class ExDDV(Dataset):
+    def __init__(self, split):
+        self.split = split
+
+    @staticmethod
+    def load_metadata():
+        df_reals = pd.read_csv("data/exddv/ExDDV_reals_FF++.csv")
+        df_reals["video-name"] = "real/" + df_reals["movie_name"]
+        df_reals["video-path"] = "/data" + df_reals["full_path"]
+
+        df_fakes = pd.read_csv("data/exddv/ExDDV_with_full_path.csv")
+        df_fakes["video-name"] = df_fakes["dataset"] + "/" + df_fakes["movie_name"]
+        df_fakes["video-path"] = "/data" + df_fakes["full_path"]
+
+        return df_reals, df_fakes
+
+    @staticmethod
+    def get_videos() -> list:
+        df_reals, df_fakes = ExDDV.load_metadata()
+
+        cols = ["video-name", "video-path"]
+        videos_fake = df_fakes[cols].to_dict(orient="records")
+        videos_real = df_reals[cols].to_dict(orient="records")
+
+        return videos_fake + videos_real
+
+    def __len__(self):
         pass
 
-    def load_metadata(self):
-        df_reals = pd.read_csv("data/exddv/ExDDV_reals_FF++.csv")
-        df_fakes = pd.read_csv("data/exddv/ExDDV_with_full_path.csv")
-        return {"real": df_reals, "fake": df_fakes}
+    def __getitem__(self, i):
+        pass
 
-    def get_video_paths(self) -> list:
-        metadata = self.load_metadata()
-        paths_real = [row.full_path for row in metadata["real"].itertuples()]
-        paths_fake = [row.full_path for row in metadata["fake"].itertuples()]
-        paths = paths_real + paths_fake
-        paths = ["/data" + path for path in paths]
-        return paths
 
 
 DATASETS = {
