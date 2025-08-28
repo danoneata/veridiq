@@ -159,9 +159,8 @@ class AutoregressorHead(L.LightningModule):
 
         return output
 
-    def predict_scores(self, video_feats, audio_feats, masks):
+    def predict_scores(self, features, masks):
 
-        features = torch.cat((video_feats, audio_feats), dim=-1)
         masks = masks[:, 1:]
 
         # features = self.pca(features)
@@ -175,8 +174,7 @@ class AutoregressorHead(L.LightningModule):
         return mse_loss
 
     def training_step(self, batch, batch_idx):
-        video_feats, audio_feats, masks, _, _ = batch
-        features = torch.cat((video_feats, audio_feats), dim=-1)
+        features, masks, _, _ = batch
         masks = masks[:, 1:]
 
         # features = self.pca(features)
@@ -194,8 +192,7 @@ class AutoregressorHead(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        video_feats, audio_feats, masks, _, _ = batch
-        features = torch.cat((video_feats, audio_feats), dim=-1)
+        features, masks, _, _ = batch
         masks = masks[:, 1:]
 
         # features = self.pca(features)
