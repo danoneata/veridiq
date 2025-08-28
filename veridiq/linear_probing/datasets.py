@@ -1,10 +1,14 @@
 import os
 import json
 
+import h5py
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
+
+from toolz import dissoc
+
 
 INVALID_VIDS = [
     "FakeVideo-FakeAudio/African/women/id02071/00195_id01661_SdP_Monh-_4_id04547_wavtolip.mp4",
@@ -388,12 +392,45 @@ class PerFileDataset(Dataset):
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
 
 
+class DanDataset(Dataset):
+    from veridiq.data import DATASETS as DATASETS_DAN
+    from veridiq.extract_features import FEATURE_DIR
+
+    def __init__(self, split, sub_dataset_name, feature_name):
+        Dataset = self.DATASETS_DAN[sub_dataset_name]
+        videos = Dataset.get_videos()
+        videos = [v for v in videos if v["split"] == split]
+        self.videos = videos
+
+        path = self.FEATURE_DIR / sub_dataset_name / (feature_name + ".h5")
+        # self.data = h5py.File(path, "r")
+
+    def __len__(self):
+        return len(self.videos)
+
+    def __getitem__(self, i):
+        video = self.videos[i]
+        video_name = video["name"]
+        import pdb; pdb.set_trace()
+
+        features = self.data[video_name]["features"][...]
+        features = torch.tensor(features, dtype=torch.float32)
+
+        label = 0 if video["label"] == "real" else 1
+
+        return features, label, video_name
+
+
 def load_data(config, test=False):
+
     if test:
         if config["dataset_name"] == "FAVC_old":
             test_ds = FakeAVCeleb_Dataset(config, split="test")
         elif config["dataset_name"] == "BitDF":
             test_ds = PerFileDataset(config)
+        elif config["dataset_name"] == "DanDataset":
+            config_rest = dissoc(config, "dataset_name")
+            test_ds = DanDataset(split="test", **config_rest)
         else:
             test_ds = AV1M_test_dataset(config)
         test_dl = DataLoader(test_ds, shuffle=False, batch_size=1)
@@ -404,6 +441,10 @@ def load_data(config, test=False):
         if config["dataset_name"] == "FAVC_old":
             train_ds = FakeAVCeleb_Dataset(config, split="train")
             val_ds = FakeAVCeleb_Dataset(config, split="val")
+        elif config["dataset_name"] == "DanDataset":
+            config_rest = dissoc(config, "dataset_name")
+            train_ds = DanDataset(split="train", **config_rest)
+            val_ds = DanDataset(split="val", **config_rest)
         else:
             train_ds = AV1M_trainval_dataset(config, split="train")
             val_ds = AV1M_trainval_dataset(config, split="val")

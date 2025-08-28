@@ -1,0 +1,24 @@
+data_info:
+  dataset_name: "DanDataset"
+  sub_dataset_name: "exddv"
+  feature_name: "clip"
+
+model_hparams:
+  input_type: "both"  # both, video, audio, multimodal (choose either to use both modalities or just one of them)
+  feats_dim: 768  # dimension of input feats
+
+callbacks:
+  logger:
+    log_path: "output/training-linear-probing/exddv-clip/logs"
+    name: "csv"
+  ckpt_args:
+    ckpt_dir: "output/training-linear-probing/exddv-clip/ckpts"
+    metric: "val_loss"
+    mode: "min"
+  early_stopping:
+    metric: "val_loss"
+    mode: "min"
+    patience: 10
+
+epochs: 100
+seed: 43
