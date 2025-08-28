@@ -1,0 +1,44 @@
+data_info:
+  name: "AV1M"
+  audio_root_path: "/av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b"  # /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b /mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/
+  video_root_path: ""  # /av1m_test/other/CLIP_features
+  csv_root_path: "/mnt_1/real_data_features/45k+5k_split/"
+  modality: "audio"  # "both", "audio", "video"
+  apply_l2: True
+  batch_size: 32  # for mlp it should be 1
+  num_workers: 32  # for mlp it should be 1
+
+model_hparams:
+  model_name: "autoregressor"
+  feats_dim: 3840  # 768, 1024, 3840
+  d_model: 512
+  nhead: 4
+  d_ff: 1024
+  num_layers: 4
+  lr: 0.001
+
+# apply_pca:
+#   pca_model_path: "pca_analysis/self_large_vox_433h/pca_model.joblib"
+#   pca_n_components: 1798
+# apply_quantization:
+#   quant_method: "static_values"
+#   quant_buckets: 2048
+#   quant_scaler: 2048
+#   quant_min: "pca_analysis/self_large_vox_433h/min_values.npy"
+#   quant_max: "pca_analysis/self_large_vox_433h/max_values.npy"
+
+callbacks:
+  logger:
+    log_path: "outputs/logs/wav2vec"
+    name: "csv"
+  ckpt_args:
+    ckpt_dir: "outputs/ckpts/wav2vec"
+    metric: "val_loss"
+    mode: "min"
+  early_stopping:
+    metric: "val_loss"
+    mode: "min"
+    patience: 10
+
+epochs: 100
+seed: 43

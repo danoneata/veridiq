@@ -82,10 +82,10 @@ def test(config):
     all_paths = np.array([])
     with torch.no_grad():
         for batch in tqdm.tqdm(test_dl):
-            video_feats, audio_feats, masks, labels, paths = batch
-            video_feats, audio_feats, masks = video_feats.to("cuda"), audio_feats.to("cuda"), masks.to("cuda")
+            feats, masks, labels, paths = batch
+            feats, masks = feats.to("cuda"), masks.to("cuda")
 
-            scores = model.predict_scores(video_feats, audio_feats, masks)
+            scores = model.predict_scores(feats, masks)
 
             all_scores = np.concatenate((all_scores, scores.cpu().numpy()), axis=0)
             all_labels = np.concatenate((all_labels, labels.cpu().numpy()), axis=0)

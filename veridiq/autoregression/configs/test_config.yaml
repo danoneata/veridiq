@@ -1,0 +1,16 @@
+data_info:
+  name: "DFEval"  # FAVC, AV1M, DFEval
+  audio_root_path: "/av_extracted_features/bitdf_wav2vec"  # /mnt_1/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features/ /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b/test
+  video_root_path: "/av_extracted_features/bitdf_avh"  # /av1m_test/other/CLIP_features/test
+  csv_root_path: "/veridiq/dataset/filtered_tracks_processed/"  # "/mnt_1/av_deepfake_1m/" "/mnt/datasets/FakeAVCeleb_preprocessed/all_splits/" "/veridiq/dataset/filtered_tracks_processed/"
+  apply_l2: True
+  rvra_fvfa_only: True
+  # metadata_path: "/mnt_1/av_deepfake_1m/val_metadata.json"  # Used only if rvra_fvfa_only and name == AV1M
+  files_to_remove: "/root/veridiq/veridiq/linear_probing/files_to_remove.txt"  # Used only if name == "DFEval"
+  modality: "audio"  # "both", "audio", "video"
+
+ckpt_path: "/root/veridiq/veridiq/autoregression/outputs/ckpts/wav2vec/model-epoch=98.ckpt"
+
+output_path: "/root/veridiq/veridiq/autoregression/outputs/results_dfeval/wav2vec"
+
+seed: 43
