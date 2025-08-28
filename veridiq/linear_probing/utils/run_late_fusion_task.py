@@ -11,6 +11,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 if __name__ == "__main__":
     models_to_run = ["clip", "wav2vec", "video_mae", "avh_audio", "avh_video"]
+    labels_models = ["CLIP", "Wav2Vec2", "Video-MAE", "AV-HuBERT(A)", "AV-HuBERT(V)"]
     root_path = "/mnt/results_uni_multi_modal/outputs/"
     dst_path = "/root/veridiq/veridiq/linear_probing/outputs/results_correlation/"
 
@@ -59,10 +60,10 @@ if __name__ == "__main__":
                     f.write(f"AUC: {auc}\n")
                     f.write(f"AP: {ap}\n\n")
 
-        sns.heatmap(results_auc, vmin=0.0, vmax=1.0, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_auc, vmin=0.0, vmax=1.0, xticklabels=labels_models, yticklabels=labels_models, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_auc.png"))
         plt.clf()
-        sns.heatmap(results_ap, vmin=0.0, vmax=1.0, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_ap, vmin=0.0, vmax=1.0, xticklabels=labels_models, yticklabels=labels_models, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap.png"))
         plt.clf()
 
@@ -70,38 +71,42 @@ if __name__ == "__main__":
         results_auc_diff = results_auc - diag_auc
         diag_ap = np.diag(results_ap)[:, np.newaxis]
         results_ap_diff = results_ap - diag_ap
-        sns.heatmap(results_auc_diff, vmin=-0.5, vmax=0.5, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_auc_diff, vmin=-0.5, vmax=0.5, xticklabels=labels_models, yticklabels=labels_models, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_auc_diff.png"))
         plt.clf()
-        sns.heatmap(results_ap_diff, vmin=-0.5, vmax=0.5, xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_ap_diff, vmin=-0.5, vmax=0.5, xticklabels=labels_models, yticklabels=labels_models, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap_diff.png"))
         plt.clf()
 
         results_auc_diff_per = (results_auc_diff / diag_auc)
         results_ap_diff_per = (results_ap_diff / diag_ap)
-        sns.heatmap(results_auc_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_auc_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", xticklabels=labels_models, yticklabels=labels_models, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_auc_diff_per.png"))
         plt.clf()
-        sns.heatmap(results_ap_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", xticklabels=models_to_run, yticklabels=models_to_run, annot=True)
+        sns.heatmap(results_ap_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", xticklabels=labels_models, yticklabels=labels_models, annot=True)
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap_diff_per.png"))
         plt.clf()
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 7.5), gridspec_kw={"width_ratios": [1.5, 7.5], "wspace": 0.01}, constrained_layout=True)
-        sns.heatmap(diag_auc, vmin=0.0, vmax=1.0, ax=ax1, cbar=False, yticklabels=models_to_run, annot=True, square=True)
+        sns.set_theme(font_scale=1.2)
+        sns.heatmap(diag_auc*100, fmt=".2f", vmin=0.0, vmax=100.0, ax=ax1, cbar=False, xticklabels=[], yticklabels=labels_models, annot=True, square=True)
         # fig.colorbar(ax1.collections[0], ax=ax1,location="left", use_gridspec=False, pad=0.2)
-        sns.heatmap(results_auc_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", cmap=sns.diverging_palette(220, 10, as_cmap=True, center="light"), ax=ax2, cbar=False, xticklabels=models_to_run, annot=True, square=True)
+        sns.heatmap(results_auc_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", cmap=sns.diverging_palette(10, 220, as_cmap=True, center="light"), ax=ax2, cbar=False, xticklabels=labels_models, yticklabels=[], annot=True, square=True)
         # fig.colorbar(ax2.collections[0], ax=ax2,location="right", use_gridspec=False, pad=0.2)
         ax2.yaxis.tick_right()
         ax2.tick_params(rotation=0)
+        ax2.set_title("Improvement compared to baseline")
         plt.savefig(os.path.join(dst_path, midpath, f"results_auc_comparison.png"))
         plt.clf()
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9, 7.5), gridspec_kw={"width_ratios": [1.5, 7.5], "wspace": 0.01}, constrained_layout=True)
-        sns.heatmap(diag_ap, vmin=0.0, vmax=1.0, ax=ax1, cbar=False, yticklabels=models_to_run, annot=True, square=True)
+        sns.set_theme(font_scale=1.2)
+        sns.heatmap(diag_ap*100, fmt=".2f", vmin=0.0, vmax=100.0, ax=ax1, cbar=False, xticklabels=[], yticklabels=labels_models, annot=True, square=True)
         # fig.colorbar(ax1.collections[0], ax=ax1,location="left", use_gridspec=False, pad=0.2)
-        sns.heatmap(results_ap_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", cmap=sns.diverging_palette(220, 10, as_cmap=True, center="light"), ax=ax2, cbar=False, xticklabels=models_to_run, annot=True, square=True)
+        sns.heatmap(results_ap_diff_per, vmin=-0.5, vmax=0.5, fmt=".1%", cmap=sns.diverging_palette(10, 220, as_cmap=True, center="light"), ax=ax2, cbar=False, xticklabels=labels_models, yticklabels=[], annot=True, square=True)
         # fig.colorbar(ax2.collections[0], ax=ax2,location="right", use_gridspec=False, pad=0.2)
         ax2.yaxis.tick_right()
         ax2.tick_params(rotation=0)
+        ax2.set_title("Improvement compared to baseline")
         plt.savefig(os.path.join(dst_path, midpath, f"results_ap_comparison.png"))
         plt.clf()
