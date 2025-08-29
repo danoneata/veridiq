@@ -31,7 +31,13 @@ class ExDDV:
         df_reals["label"] = "real"
 
         df_fakes = pd.read_csv("data/exddv/ExDDV_with_full_path.csv")
-        df_fakes["name"] = df_fakes["dataset"] + "/" + df_fakes["movie_name"]
+        df_fakes["name"] = (
+            df_fakes["dataset"]
+            + "/"
+            + df_fakes["manipulation"]
+            + "/"
+            + df_fakes["movie_name"]
+        )
         df_fakes["path"] = "/data" + df_fakes["full_path"]
         df_fakes["label"] = "fake"
 
@@ -41,12 +47,20 @@ class ExDDV:
     def get_videos() -> list[dict]:
         df_reals, df_fakes = ExDDV.load_metadata()
 
+        cols = ["name", "path", "split", "label", "text", "click_locations"]
+        videos_fake = df_fakes[cols]
+        videos_fake = videos_fake.drop_duplicates(subset=["path"])
+        videos_fake = videos_fake.to_dict(orient="records")
+        for datum in videos_fake:
+            clicks = datum.pop("click_locations")
+            clicks = json.loads(clicks)
+            datum["clicks"] = [{"frame-idx": int(k), **v} for k, v in clicks.items()]
+
         cols = ["name", "path", "split", "label"]
-        videos_fake = df_fakes[cols].to_dict(orient="records")
-        videos_real = df_reals[cols].to_dict(orient="records")
+        videos_real = df_reals[cols]
+        videos_real = videos_real.to_dict(orient="records")
 
         return videos_fake + videos_real
-
 
 
 DATASETS = {
