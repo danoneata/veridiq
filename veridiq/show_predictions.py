@@ -22,12 +22,6 @@ import numpy as np
 import streamlit as st
 import torch
 
-from torch import nn
-from torch.nn import Module
-
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
-
 from veridiq.data import AV1M
 from veridiq.extract_features import FeatureExtractor, load_video_frames
 from veridiq.utils import cache_json, cache_np, implies
@@ -49,32 +43,9 @@ SUBSAMPLING_FACTORS = {
     "VideoMAE": 2,
 }
 
-
-class LinearModel(Module):
-    def __init__(self, dim=768):
-        super().__init__()
-        self.head = nn.Linear(dim, 1)
-
-    def forward(self, x):
-        return self.head(x)
-
-
-class FullModel(Module):
-    def __init__(self, feature_extractor: FeatureExtractor, model_linear):
-        super().__init__()
-        self.feature_extractor = feature_extractor
-        self.model_linear = model_linear
-
-    def forward(self, x):
-        x = self.feature_extractor(x)
-        x = x / torch.linalg.norm(x, axis=1, keepdims=True)
-        x = self.model_linear(x)
-        return x
-
-
 def load_video_frames_datum(datum):
     video_path = DATASET.get_video_path(datum["file"])
-    return load_video_frames
+    return load_video_frames(video_path)
 
 
 def pred_to_proba(score):
@@ -310,145 +281,6 @@ def show1(preds, datum, feature_extractor_type):
     )
     st.video(video_path)
     st.pyplot(fig)
-
-
-def reshape_transform(tensor, height=16, width=16):
-    result = tensor[:, 1:, :].reshape(tensor.size(0), height, width, tensor.size(2))
-    # Bring the channels to the first dimension, # like in CNNs.
-    result = result.transpose(2, 3).transpose(1, 2)
-    return result
-
-
-class MyGradCAM:
-    def __init__(self, feature_extractor_type="CLIP"):
-        SIZES = {
-            "CLIP": {
-                "height": 16,
-                "width": 16,
-            },
-            "FSFM": {
-                "height": 14,
-                "width": 14,
-            },
-        }
-
-        feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
-        model_classifier = load_model_classifier(feature_extractor_type)
-
-        model_full = FullModel(feature_extractor, model_classifier)
-        model_full.eval()
-        model_full.to(DEVICE)
-
-        self.transform_images = feature_extractor.transform
-        self.feature_extractor_type = feature_extractor_type
-
-        # Dictionary mapping feature extractor types to their target layers
-        TARGET_LAYERS = {
-            "CLIP": lambda model: [
-                model.feature_extractor.model.vision_model.encoder.layers[
-                    -1
-                ].layer_norm1
-            ],
-            "FSFM": lambda model: [model.feature_extractor.model.blocks[-1]],
-        }
-
-        target_layers = TARGET_LAYERS[feature_extractor_type](model_full)
-        self.target = BinaryClassifierOutputTarget(1)
-
-        self.grad_cam = GradCAM(
-            model=model_full,
-            target_layers=target_layers,
-            reshape_transform=partial(
-                reshape_transform, **SIZES[feature_extractor_type]
-            ),
-        )
-
-    def get_explanation_batch(self, images):
-        n_images = len(images)
-
-        images = self.transform_images(images)
-        images = images.to(DEVICE)
-
-        targets = [self.target for _ in range(n_images)]
-
-        return self.grad_cam(
-            input_tensor=images,
-            targets=targets,
-            eigen_smooth=None,
-            aug_smooth=None,
-        )
-
-    def get_explanation_video(self, video):
-        B = 16
-        output = [
-            self.get_explanation_batch(frames) for frames in partition_all(B, video)
-        ]
-        output = np.concatenate(output, axis=0)
-        return output
-
-    @staticmethod
-    def show_cam_on_image(
-        img: np.ndarray,
-        mask: np.ndarray,
-        use_rgb: bool = False,
-        colormap: int = cv2.COLORMAP_JET,
-        image_weight: float = 0.5,
-        max_value: Optional[float] = None,
-    ) -> np.ndarray:
-        # Modified version from pytorch_grad_cam.utils.image.show_cam_on_image to allow for arbitrary maximum value.
-        # https://github.com/jacobgil/pytorch-grad-cam/blob/781dbc0d16ffa95b6d18b96b7b829840a82d93d1/pytorch_grad_cam/utils/image.py#L35C1-L66C31
-        heatmap = cv2.applyColorMap(np.uint8(255 * mask), colormap)
-        if use_rgb:
-            heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-        heatmap = np.float32(heatmap) / 255
-
-        if np.max(img) > 1:
-            raise Exception("The input image should np.float32 in the range [0, 1]")
-
-        if image_weight < 0 or image_weight > 1:
-            raise Exception(
-                f"image_weight should be in the range [0, 1].\
-                    Got: {image_weight}"
-            )
-
-        cam = (1 - image_weight) * heatmap + image_weight * img
-        max_value = np.max(cam) if max_value is None else max_value
-        cam = cam / max_value
-        return np.uint8(255 * cam)
-
-    def make_video(self, datum):
-        path = Path("output/grad-cam")
-        path = path / datum["file"]
-        path = path.with_suffix(".mp4")
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        if path.exists():
-            return path
-
-        path_npy = path.with_suffix(".npy")
-        frames = list(load_video_frames(datum))
-        output = cache_np(path_npy, my_grad_cam.get_explanation_video, frames)
-
-        video_writer = cv2.VideoWriter(
-            str(path),
-            cv2.VideoWriter_fourcc(*"H264"),
-            25,
-            (frames[0].shape[1], frames[0].shape[0]),
-        )
-        max_value = np.max(output)
-        for frame, cam in zip(frames, output):
-            frame = frame / 255
-            image = my_grad_cam.show_cam_on_image(
-                frame,
-                cam,
-                use_rgb=True,
-                max_value=max_value,
-            )
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            video_writer.write(image)
-
-        video_writer.release()
-        return path
 
 
 def show_frames(preds, datum, my_grad_cam):
