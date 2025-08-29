@@ -403,7 +403,7 @@ class DanDataset(Dataset):
         self.videos = videos
 
         path = self.FEATURE_DIR / sub_dataset_name / (feature_name + ".h5")
-        # self.data = h5py.File(path, "r")
+        self.data = h5py.File(path, "r")
 
     def __len__(self):
         return len(self.videos)
@@ -411,14 +411,14 @@ class DanDataset(Dataset):
     def __getitem__(self, i):
         video = self.videos[i]
         video_name = video["name"]
-        import pdb; pdb.set_trace()
 
-        features = self.data[video_name]["features"][...]
-        features = torch.tensor(features, dtype=torch.float32)
+        feats = self.data[video_name]["features"][...]
+        feats = torch.tensor(feats, dtype=torch.float32)
+        feats = feats / feats.norm(dim=-1, keepdim=True)
 
         label = 0 if video["label"] == "real" else 1
 
-        return features, None, label, video_name
+        return feats, feats, label, video_name
 
 
 def load_data(config, test=False):
