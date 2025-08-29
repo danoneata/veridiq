@@ -96,7 +96,7 @@ class CLIP(FeatureExtractor):
     def get_features(self, x):
         # This method is required to satisfy the abstract base class.
         # It will be replaced by the appropriate method in __init__.
-        raise NotImplementedError("get_image_features is set dynamically in __init__")
+        raise NotImplementedError("get_features is set dynamically in __init__")
 
     def get_image_features_pre_projection(self, x, tokens, layer):
         outputs = self.model.vision_model(x, output_hidden_states=True)
@@ -109,7 +109,7 @@ class CLIP(FeatureExtractor):
         return self.model.get_image_features(x)
 
     def forward(self, x):
-        return self.get_image_features(x)
+        return self.get_features(x)
 
 
 class FSFM(FeatureExtractor):
