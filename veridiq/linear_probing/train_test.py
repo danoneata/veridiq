@@ -4,6 +4,8 @@ import tqdm
 import os
 import yaml
 
+from pathlib import Path
+
 import lightning as L
 import numpy as np
 import pandas as pd
@@ -12,8 +14,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from datasets import load_data
-from model import LinearModel
+from veridiq.linear_probing.datasets import load_data
+from veridiq.linear_probing.model import LinearModel
 
 
 def init_callbacks(config):
@@ -61,6 +63,32 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
+def get_checkpoint_path(config):
+    """Allows to get the checkpoint path from a training config."""
+    if "ckpt_path" in config:
+        return config["ckpt_path"]
+    elif "callbacks" in config:
+        checkpoint_dir = config["callbacks"]["ckpt_args"]["ckpt_dir"]
+        files = os.listdir(checkpoint_dir)
+        assert len(files) == 1, "More than one checkpoint in the folder"
+        return os.path.join(checkpoint_dir, files[0])
+    else:
+        raise ValueError("No checkpoint path found in config.")
+
+
+def get_output_path(config):
+    """Allows to get the output path from a training config."""
+    if "output_path" in config:
+        return config["output_path"]
+    elif "callbacks" in config:
+        log_dir = Path(config["callbacks"]["logger"]["log_path"])
+        out_dir = log_dir.parent
+        out_dir = out_dir / "test"
+        return str(out_dir)
+    else:
+        raise ValueError("No output path found in config.")
+
+
 def train(config):
     train_dl, val_dl = load_data(config=config["data_info"])
     model = LinearModel(config=config)
@@ -72,7 +100,9 @@ def train(config):
 
 def test(config):
     test_dl = load_data(config=config["data_info"], test=True)
-    model = LinearModel.load_from_checkpoint(config["ckpt_path"])
+
+    path_checkpoint = get_checkpoint_path(config)
+    model = LinearModel.load_from_checkpoint(path_checkpoint)
 
     model.to("cuda")
     model.eval()
@@ -91,17 +121,18 @@ def test(config):
             all_labels = np.concatenate((all_labels, labels.cpu().numpy()), axis=0)
             all_paths = np.concatenate((all_paths, paths), axis=0)
 
-    os.makedirs(config["output_path"], exist_ok=True)
+    path_output = get_output_path(config)
+    os.makedirs(path_output, exist_ok=True)
 
     pd.DataFrame({
         "paths": all_paths,
         "scores": all_scores,
         "labels": all_labels
-    }).to_csv(os.path.join(config["output_path"], "results.csv"), index=False)
-    with open(os.path.join(config["output_path"], "tested_config.yaml"), "w") as f:
+    }).to_csv(os.path.join(path_output, "results.csv"), index=False)
+    with open(os.path.join(path_output, "tested_config.yaml"), "w") as f:
         yaml.safe_dump(config, f)
 
-    with open(os.path.join(config["output_path"], "eval_results.txt"), "w") as f:
+    with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
         f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
         f.write(f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n")
 

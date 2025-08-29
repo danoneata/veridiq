@@ -4,8 +4,8 @@ data_info:
   feature_name: "clip"
 
 model_hparams:
-  input_type: "both"  # both, video, audio, multimodal (choose either to use both modalities or just one of them)
-  feats_dim: 768  # dimension of input feats
+  input_type: "video"
+  feats_dim: 768
 
 callbacks:
   logger:

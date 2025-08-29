@@ -418,7 +418,7 @@ class DanDataset(Dataset):
 
         label = 0 if video["label"] == "real" else 1
 
-        return features, label, video_name
+        return features, None, label, video_name
 
 
 def load_data(config, test=False):
