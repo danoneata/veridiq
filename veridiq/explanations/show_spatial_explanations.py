@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import random
 
 import cv2
@@ -10,7 +11,13 @@ from veridiq.data import ExDDV
 from veridiq.extract_features import load_video_frames
 from veridiq.explanations.generate_spatial_explanations import MyGradCAM
 
+
 st.set_page_config(layout="wide")
+
+
+@st.cache_resource
+def load_gradcam():
+    return MyGradCAM.from_config_name("exddv-clip")
 
 
 def add_location(frame, click):
@@ -39,25 +46,27 @@ def load_predictions():
     return df.to_dict(orient="index")
 
 
-class Sorter:
-    def __call__(self, videos):
+class Sorter(ABC):
+    @abstractmethod
+    def __call__(self, data):
         pass
 
+    @abstractmethod
     def __str__(self):
         pass
 
 
 class NoSorter(Sorter):
-    def __call__(self, videos):
-        return videos
+    def __call__(self, data):
+        return data
 
     def __str__(self):
         return "none"
 
 
 class RandomSorter(Sorter):
-    def __call__(self, videos):
-        return random.sample(videos, len(videos))
+    def __call__(self, data):
+        return random.sample(data, len(data))
 
     def __str__(self):
         return "random"
@@ -68,11 +77,33 @@ class KeySorter(Sorter):
         self.key = key
         self.reverse = reverse
 
-    def __call__(self, videos):
-        return sorted(videos, key=lambda x: x[self.key], reverse=self.reverse)
+    def __call__(self, data):
+        return sorted(data, key=lambda x: x[self.key], reverse=self.reverse)
 
     def __str__(self):
         return "{}/{}".format(self.key, "desc" if self.reverse else "asc")
+
+
+# class Filter(ABC):
+#     @abstractmethod
+#     def __call__(self, data):
+#         pass
+
+#     @abstractmethod
+#     def __str__(self):
+#         pass
+
+
+# class FilterByKey(Filter):
+#     def __init__(self, key, value):
+#         self.key = key
+#         self.value = value
+
+#     def __call__(self, data):
+#         return [item for item in data if item[self.key] == self.value]
+
+#     def __str__(self):
+#         return "{}={}".format(self.key, self.value)
 
 
 videos = ExDDV.get_videos()
@@ -107,10 +138,6 @@ with st.sidebar:
     )
 
 
-@st.cache_resource
-def load_gradcam():
-    return MyGradCAM.from_config_name("exddv-clip")
-
 num_cols = 3
 videos = sorter(videos)
 gradcam = load_gradcam()
@@ -119,7 +146,10 @@ for video in videos[:10]:
     clicks = video["clicks"]
 
     frame_idxs = [click["frame-idx"] for click in clicks]
+    frame_idxs = sorted(frame_idxs)
+
     frames = load_video_frames(video["path"])
+    frames = [frame for i, frame in enumerate(frames) if i in frame_idxs]
     frames = [add_location(frame, click) for frame, click in zip(frames, clicks)]
 
     st.markdown("### `{}` · score: {:.1f}".format(video["name"], video["pred-score"]))
@@ -130,6 +160,7 @@ for video in videos[:10]:
         st.markdown("Video")
         st.video(video["path"])
         st.markdown("Textual annotation:\n > {}".format(video["text"]))
+        st.markdown("Frame indices:\n > {}".format(", ".join(map(str, frame_idxs))))
 
     with col2:
         st.markdown("Frame annotations")
@@ -139,7 +170,7 @@ for video in videos[:10]:
     with col3:
         st.markdown("Explanations")
         for frame in frames:
-            explanation, = gradcam.get_explanation_batch([frame])
+            (explanation,) = gradcam.get_explanation_batch([frame])
             explanation = cv2.resize(explanation, (frame.shape[1], frame.shape[0]))
             frame = frame / 255
             frame = gradcam.show_cam_on_image(frame, explanation, use_rgb=True)
