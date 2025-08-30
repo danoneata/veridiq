@@ -195,16 +195,20 @@ class MyGradCAM:
         return np.uint8(255 * cam)
 
 
-def get_images_exddv():
-    videos = ExDDV.get_videos()
+def get_exddv_videos():
+    """Returns a subset of the video on ExDDV that we use for explainability
+    purposes: fake-only videos from the test split.
+    
+    """
+    return [
+        video
+        for video in ExDDV.get_videos()
+        if video["split"] == "test" and video["label"] == "fake"
+    ]
 
-    for video in videos:
-        if video["split"] != "test":
-            continue
 
-        if video["label"] != "fake":
-            continue
-
+def get_exddv_images():
+    for video in get_exddv_videos():
         frames = load_video_frames(video["path"])
         frame_idxs = [click["frame-idx"] for click in video["clicks"]]
 
@@ -223,7 +227,7 @@ def get_images_exddv():
 @click.option("-c", "--config", "config_name")
 def main(config_name):
     my_grad_cam = MyGradCAM.from_config_name(config_name)
-    for image_data in get_images_exddv():
+    for image_data in get_exddv_images():
         explanation = my_grad_cam.get_explanation_batch([image_data["frame"]])
         break
 
