@@ -36,6 +36,11 @@ class AV1M_trainval_dataset(Dataset):
             self.df['path'] = self.df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
             self.df['label'] = self.df['category'].map({'A': 0, 'D': 1})
             self.df = self.df[~self.df['path'].isin(INVALID_VIDS)]
+        elif config["dataset_name"] == "BitDF":
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
+            self.feats_dir = self.root_path
+            self.df['path'] = self.df['full_file_path'].apply(lambda x: x.replace("/feats/", "/videos/"))
+            self.df['label'] = self.df["label"].map({"real": 0, "fake": 1})
         else:
             raise ValueError("Wrong dataset_name!")
 
@@ -71,6 +76,8 @@ class AV1M_trainval_dataset(Dataset):
                         remove_paths.append(row["path"])
                 if remove_paths:
                     self.df = self.df[~self.df["path"].isin(remove_paths)].reset_index(drop=True)
+            elif config["dataset_name"] == "BitDF":
+                print("WARNING: BitDF/Deepfake-Eval does not have support for rvra-fvfa. Continue evaluation with all samples!")
             else:
                 raise ValueError("Wrong dataset_name!")
 
