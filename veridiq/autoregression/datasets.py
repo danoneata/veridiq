@@ -89,11 +89,21 @@ class CombinedForm_Dataset(Dataset):
     def __init__(self, config):
         self.config = config
 
-        self.paths_aud = np.load(os.path.join(self.config["audio_root_path"], "paths.npy"), allow_pickle=True)
-        self.paths_vid = np.load(os.path.join(self.config["video_root_path"], "paths.npy"), allow_pickle=True)
-
-        self.audio_feats = np.load(os.path.join(self.config["audio_root_path"], "audio.npy"), allow_pickle=True)
-        self.video_feats = np.load(os.path.join(self.config["video_root_path"], "video.npy"), allow_pickle=True)
+        if self.config["modality"] == "both":
+            self.paths_aud = np.load(os.path.join(self.config["audio_root_path"], "paths.npy"), allow_pickle=True)
+            self.paths_vid = np.load(os.path.join(self.config["video_root_path"], "paths.npy"), allow_pickle=True)
+            self.audio_feats = np.load(os.path.join(self.config["audio_root_path"], "audio.npy"), allow_pickle=True)
+            self.video_feats = np.load(os.path.join(self.config["video_root_path"], "video.npy"), allow_pickle=True)
+        elif self.config["modality"] == "audio":
+            self.paths_aud = np.load(os.path.join(self.config["audio_root_path"], "paths.npy"), allow_pickle=True)
+            self.paths_vid = None
+            self.audio_feats = np.load(os.path.join(self.config["audio_root_path"], "audio.npy"), allow_pickle=True)
+            self.video_feats = None
+        elif self.config["modality"] == "video":
+            self.paths_aud = None
+            self.paths_vid = np.load(os.path.join(self.config["video_root_path"], "paths.npy"), allow_pickle=True)
+            self.audio_feats = None
+            self.video_feats = np.load(os.path.join(self.config["video_root_path"], "video.npy"), allow_pickle=True)
 
         self.csv_root_path = self.config["csv_root_path"]
         if self.config["name"] == "AV1M":
@@ -111,7 +121,7 @@ class CombinedForm_Dataset(Dataset):
 
         removed_rows = []
         for idx, row in self.df.iterrows():
-            if (row['path'] not in self.paths_aud) or (row['path'] not in self.paths_vid):
+            if (self.paths_aud is not None and row['path'] not in self.paths_aud) or (self.paths_vid is not None and row['path'] not in self.paths_vid):
                 removed_rows.append(idx)
         self.df = self.df.drop(removed_rows)
         self._get_indices()
@@ -144,15 +154,17 @@ class CombinedForm_Dataset(Dataset):
         for _, row in self.df.iterrows():
             path = row['path']
 
-            indices = np.where(self.paths_aud == path)[0]
-            if len(indices) != 1:
-                raise ValueError(f"Multiple or no values for path (audio): {path}")
-            self.indices_aud[path] = indices[0]
+            if self.config["modality"] == "both" or self.config["modality"] == "audio":
+                indices = np.where(self.paths_aud == path)[0]
+                if len(indices) != 1:
+                    raise ValueError(f"Multiple or no values for path (audio): {path}")
+                self.indices_aud[path] = indices[0]
 
-            indices = np.where(self.paths_vid == path)[0]
-            if len(indices) != 1:
-                raise ValueError(f"Multiple or no values for path (video): {path}")
-            self.indices_vid[path] = indices[0]
+            if self.config["modality"] == "both" or self.config["modality"] == "video":
+                indices = np.where(self.paths_vid == path)[0]
+                if len(indices) != 1:
+                    raise ValueError(f"Multiple or no values for path (video): {path}")
+                self.indices_vid[path] = indices[0]
 
     def __len__(self):
         return len(self.df.index)
@@ -162,14 +174,25 @@ class CombinedForm_Dataset(Dataset):
         path = row['path']
         labels = row['label']
 
-        video = self.video_feats[self.indices_vid[path]]
-        audio = self.audio_feats[self.indices_aud[path]]
+        if self.config["modality"] == "both":
+            video = self.video_feats[self.indices_vid[path]]
+            audio = self.audio_feats[self.indices_aud[path]]
+            assert self.paths_vid[self.indices_vid[path]] == path
+            assert self.paths_aud[self.indices_aud[path]] == path
 
-        residual = video.shape[0] - audio.shape[0]
-        if residual > 0:
-            video = video[:-residual]
-        elif residual < 0:
-            audio = audio[:residual]
+            residual = video.shape[0] - audio.shape[0]
+            if residual > 0:
+                video = video[:-residual]
+            elif residual < 0:
+                audio = audio[:residual]
+        elif self.config["modality"] == "audio":
+            audio = self.audio_feats[self.indices_aud[path]]
+            video = -np.ones((audio.shape[0], 1024))
+            assert self.paths_aud[self.indices_aud[path]] == path
+        elif self.config["modality"] == "video":
+            video = self.video_feats[self.indices_vid[path]]
+            audio = -np.ones((video.shape[0], 1024))
+            assert self.paths_vid[self.indices_vid[path]] == path
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
@@ -268,7 +291,7 @@ class PerFile_Dataset(Dataset):
         elif self.config["modality"] == "video":
             features = video
 
-        return torch.tensor(features), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
+        return torch.tensor(features, dtype=torch.float32), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
 
 
 ###### ######

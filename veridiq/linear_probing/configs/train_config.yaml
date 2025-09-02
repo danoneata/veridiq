@@ -1,7 +1,7 @@
 data_info:
   dataset_name: "AV1M"
   root_path: ""  # Data root path 
-  csv_root_path: "/av_deepfake_1m/av_deepfake_1m/"  # Path to the folder containing split csv's
+  csv_root_path: ""  # Path to the folder containing split csv's
   metadata_path: "/av_deepfake_1m/av_deepfake_1m/train_metadata.json"  # only for AV1M; for FAVC comment this line
   fvfa_rvra_only: True
   apply_l2: True  # Apply l2 normalization of input features (always used in our experiments)

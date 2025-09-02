@@ -1,12 +1,13 @@
 data_info:
   dataset_name: "BitDF"
   root_path: ""  # Data root path 
-  csv_root_path: "/av_deepfake_1m/av_deepfake_1m/"  # Path to the folder containing split csv's
+  csv_root_path: ""  # Path to the folder containing split csv's
   metadata_path: "/av_deepfake_1m/av_deepfake_1m/val_metadata.json"  # only for AV1M; for FAVC/BitDF comment this line
-  # files_to_remove: "/root/veridiq/veridiq/linear_probing/files_to_remove.txt"  # only for BitDF; for FAVC/AV1M comment this line
+  files_to_remove: "/root/veridiq/veridiq/linear_probing/files_to_remove.txt"  # only for BitDF; for FAVC/AV1M comment this line
   fvfa_rvra_only: True
   apply_l2: True  # Apply l2 normalization of input features (always used in our experiments)
   input_type: "both"  # both, video, audio, multimodal (choose either to use both modalities or just one of them)
+  trimmed: False
 
 ckpt_path: ""  # Path to the model ckpt
 

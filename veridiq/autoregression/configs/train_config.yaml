@@ -1,16 +1,16 @@
 data_info:
   name: "AV1M"
-  audio_root_path: "/av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b"  # /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b /mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/
-  video_root_path: ""  # /av1m_test/other/CLIP_features
+  audio_root_path: "/mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/"  # /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b /mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/
+  video_root_path: "/av1m_test/other/CLIP_features"  # /av1m_test/other/CLIP_features
   csv_root_path: "/mnt_1/real_data_features/45k+5k_split/"
-  modality: "audio"  # "both", "audio", "video"
+  modality: "both"  # "both", "audio", "video"
   apply_l2: True
   batch_size: 32  # for mlp it should be 1
   num_workers: 32  # for mlp it should be 1
 
 model_hparams:
   model_name: "autoregressor"
-  feats_dim: 3840  # 768, 1024, 3840
+  feats_dim: 1792  # 768, 1024, 3840
   d_model: 512
   nhead: 4
   d_ff: 1024
@@ -29,10 +29,10 @@ model_hparams:
 
 callbacks:
   logger:
-    log_path: "outputs/logs/wav2vec"
+    log_path: "outputs/logs/avh_audio_clip"
     name: "csv"
   ckpt_args:
-    ckpt_dir: "outputs/ckpts/wav2vec"
+    ckpt_dir: "outputs/ckpts/avh_audio_clip"
     metric: "val_loss"
     mode: "min"
   early_stopping:

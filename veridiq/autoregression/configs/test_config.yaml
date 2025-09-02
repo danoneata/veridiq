@@ -7,10 +7,10 @@ data_info:
   rvra_fvfa_only: True
   # metadata_path: "/mnt_1/av_deepfake_1m/val_metadata.json"  # Used only if rvra_fvfa_only and name == AV1M
   files_to_remove: "/root/veridiq/veridiq/linear_probing/files_to_remove.txt"  # Used only if name == "DFEval"
-  modality: "audio"  # "both", "audio", "video"
+  modality: "both"  # "both", "audio", "video"
 
-ckpt_path: "/root/veridiq/veridiq/autoregression/outputs/ckpts/wav2vec/model-epoch=98.ckpt"
+ckpt_path: "/root/veridiq/veridiq/autoregression/outputs/ckpts/wav2vec_avh_video/model-epoch=99.ckpt"
 
-output_path: "/root/veridiq/veridiq/autoregression/outputs/results_dfeval/wav2vec"
+output_path: "/root/veridiq/veridiq/autoregression/outputs/results_dfeval/wav2vec_avh_video"
 
 seed: 43
