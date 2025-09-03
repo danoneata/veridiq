@@ -227,9 +227,14 @@ def get_exddv_images():
 @click.option("-c", "--config", "config_name")
 def main(config_name):
     my_grad_cam = MyGradCAM.from_config_name(config_name)
-    for image_data in get_exddv_images():
-        explanation = my_grad_cam.get_explanation_batch([image_data["frame"]])
-        break
+    path = "output/exddv/explanations/gradcam-{}.h5".format(config_name)
+    with h5py.File(path, "w") as f:
+        for image in tqdm(get_exddv_images()):
+            explanation = my_grad_cam.get_explanation_batch([image["frame"]])
+            explanation = explanation[0]
+            group_name = "{}-{:05d}".format(image["name"], image["frame-idx"])
+            group = f.create_group(group_name)
+            group.create_dataset("explanation", data=explanation)
 
 
 if __name__ == "__main__":
