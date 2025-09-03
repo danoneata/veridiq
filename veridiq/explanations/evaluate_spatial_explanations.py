@@ -76,7 +76,7 @@ class GetPredictionGradCAM:
 
         frame = self.get_first_frame(video)
         explanation = undo_image_transform_clip(frame, explanation)
-        return self.get_position(explanation, frame)
+        return self.get_position(frame, explanation)
 
 
 GET_PREDICTORS = {
