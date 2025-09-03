@@ -2,12 +2,15 @@ import pdb
 import random
 
 import click
+import h5py
 import numpy as np
 
 from sklearn.metrics import mean_absolute_error
+from toolz import first
 
 from veridiq.data import ExDDV
-from veridiq.explanations.generate_spatial_explanations import get_exddv_videos
+from veridiq.extract_features import load_video_frames
+from veridiq.explanations.generate_spatial_explanations import get_exddv_videos, undo_image_transform_clip
 from veridiq.utils import read_json
 
 
@@ -47,11 +50,40 @@ class GetPredictionCenterFace:
         return {"x": x / w, "y": y / h}
 
 
+class GetPredictionGradCAM:
+    def __init__(self):
+        config_name = "exddv-clip"
+        path = "output/exddv/explanations/gradcam-{}.h5".format(config_name)
+        self.file = h5py.File(path, "r")
+
+    def get_first_frame(self, video):
+        return first(load_video_frames(video["path"]))
+
+    @staticmethod
+    def get_position(frame, explanation):
+        indices = np.argwhere(explanation == np.max(explanation))
+        y, x = np.mean(indices, axis=0)
+        h, w, _ = frame.shape
+        return {"x": x / w, "y": y / h}
+
+    def __call__(self, video, click):
+        try:
+            group_name = "{}-{:05d}".format(video["name"], click["frame-idx"])
+            explanation = self.file[group_name]["explanation"][...]
+        except KeyError:
+            print("WARN no explanation for {}".format(group_name))
+            return {"x": 0.5, "y": 0.5}
+
+        frame = self.get_first_frame(video)
+        explanation = undo_image_transform_clip(frame, explanation)
+        return self.get_position(explanation, frame)
+
+
 GET_PREDICTORS = {
     "random": lambda: get_prediction_random,
     "center": lambda: get_prediction_center,
     "center-face": GetPredictionCenterFace,
-    # "gradcam": get_prediction_gradcam,
+    "gradcam": GetPredictionGradCAM,
 }
 
 
