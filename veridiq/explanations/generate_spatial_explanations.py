@@ -1,24 +1,34 @@
 import pdb
 
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
 import click
 import cv2
+import h5py
 import numpy as np
 import torch
 import yaml
 
-from functools import partial
-
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
+
+from transformers.image_transforms import get_resize_output_image_size
 
 from torch import nn
 from toolz import partition_all
 
+from tqdm import tqdm
+
 from veridiq.data import ExDDV
-from veridiq.extract_features import FeatureExtractor, DEVICE, FEATURE_EXTRACTORS, PerFrameFeatureExtractor, load_video_frames
+from veridiq.extract_features import (
+    FeatureExtractor,
+    DEVICE,
+    FEATURE_EXTRACTORS,
+    PerFrameFeatureExtractor,
+    load_video_frames,
+)
 from veridiq.linear_probing.train_test import get_checkpoint_path
 
 
@@ -90,7 +100,9 @@ class FullModel(nn.Module):
 
 # Dictionary mapping feature extractor types to their target layers
 TARGET_LAYERS = {
-    "clip": lambda model: [model.feature_extractor.model.vision_model.encoder.layers[-1].layer_norm1],
+    "clip": lambda model: [
+        model.feature_extractor.model.vision_model.encoder.layers[-1].layer_norm1
+    ],
     "fsfm": lambda model: [model.feature_extractor.model.blocks[-1]],
 }
 
@@ -110,7 +122,9 @@ class MyGradCAM:
     def __init__(self, config):
         feature_extractor_type = config["data_info"]["feature_name"]
         feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
-        assert isinstance(feature_extractor, PerFrameFeatureExtractor), "Only PerFrameFeatureExtractor is currently supported."
+        assert isinstance(
+            feature_extractor, PerFrameFeatureExtractor
+        ), "Only PerFrameFeatureExtractor is currently supported."
         feature_extractor = feature_extractor.model
         model_classifier = load_model_classifier_from_config(config)
 
@@ -198,7 +212,7 @@ class MyGradCAM:
 def get_exddv_videos():
     """Returns a subset of the video on ExDDV that we use for explainability
     purposes: fake-only videos from the test split.
-    
+
     """
     return [
         video
