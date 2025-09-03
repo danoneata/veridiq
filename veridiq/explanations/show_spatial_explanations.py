@@ -19,6 +19,7 @@ from veridiq.explanations.generate_spatial_explanations import (
     MyGradCAM,
     undo_image_transform_clip,
 )
+from veridiq.explanations.utils import load_predictions
 
 
 st.set_page_config(layout="wide")
@@ -58,13 +59,6 @@ def add_location(frame, loc, color=(255, 0, 0)):
         color=color,
         thickness=thickness,
     )
-
-
-def load_predictions():
-    df = pd.read_csv("output/training-linear-probing/exddv-clip/test/results.csv")
-    df = df.rename(columns={"paths": "name", "scores": "pred-score", "labels": "label"})
-    df = df.set_index("name")
-    return df.to_dict(orient="index")
 
 
 class Sorter(ABC):
