@@ -1,30 +1,51 @@
 from abc import ABC, abstractmethod
+import pdb
 import random
 
 import cv2
+import h5py
 import pandas as pd
 import streamlit as st
 
 from toolz import partition_all
 
 from veridiq.data import ExDDV
+from veridiq.explanations.evaluate_spatial_explanations import (
+    GetPredictionGradCAM,
+    evaluate1,
+)
 from veridiq.extract_features import load_video_frames
-from veridiq.explanations.generate_spatial_explanations import MyGradCAM
+from veridiq.explanations.generate_spatial_explanations import (
+    MyGradCAM,
+    undo_image_transform_clip,
+)
 
 
 st.set_page_config(layout="wide")
+CONFIG_NAME = "exddv-clip"
 
 
 @st.cache_resource
 def load_gradcam():
-    return MyGradCAM.from_config_name("exddv-clip")
+    return MyGradCAM.from_config_name(CONFIG_NAME)
 
 
-def add_location(frame, click):
+@st.cache_resource
+def load_gradcam_file():
+    path = "output/exddv/explanations/gradcam-{}.h5".format(CONFIG_NAME)
+    return h5py.File(path, "r")
+
+
+def load_gradcam_from_file(file, name, i):
+    group_name = "{}-{:05d}".format(name, i)
+    return file[group_name]["explanation"][...]
+
+
+def add_location(frame, loc, color=(255, 0, 0)):
     # Convert relative coordinates to absolute coordinates.
     h, w, _ = frame.shape
-    x = int(click["x"] * w)
-    y = int(click["y"] * h)
+    x = int(loc["x"] * w)
+    y = int(loc["y"] * h)
 
     # Use for radius and thickness relative to the frame size.
     radius = int(0.05 * (h + w) / 2)
@@ -34,7 +55,7 @@ def add_location(frame, click):
         frame,
         (x, y),
         radius=radius,
-        color=(255, 0, 0),
+        color=color,
         thickness=thickness,
     )
 
@@ -140,13 +161,15 @@ with st.sidebar:
 
 num_cols = 3
 videos = sorter(videos)
-gradcam = load_gradcam()
+
+# gradcam = load_gradcam()
+gradcam_file = load_gradcam_file()
 
 for video in videos[:10]:
     clicks = video["clicks"]
 
+    clicks = sorted(clicks, key=lambda x: x["frame-idx"])
     frame_idxs = [click["frame-idx"] for click in clicks]
-    frame_idxs = sorted(frame_idxs)
 
     frames = load_video_frames(video["path"])
     frames = [frame for i, frame in enumerate(frames) if i in frame_idxs]
@@ -158,22 +181,37 @@ for video in videos[:10]:
 
     with col1:
         st.markdown("Video")
+        st.markdown("")
         st.video(video["path"])
         st.markdown("Textual annotation:\n > {}".format(video["text"]))
-        st.markdown("Frame indices:\n > {}".format(", ".join(map(str, frame_idxs))))
+        # st.markdown("Frame indices:\n > {}".format(", ".join(map(str, frame_idxs))))
 
     with col2:
         st.markdown("Frame annotations")
-        for frame in frames:
+        for frame_idx, frame in zip(frame_idxs, frames):
+            st.markdown("Frame: {}".format(frame_idx))
             st.image(frame)
 
     with col3:
         st.markdown("Explanations")
-        for frame in frames:
-            (explanation,) = gradcam.get_explanation_batch([frame])
-            explanation = cv2.resize(explanation, (frame.shape[1], frame.shape[0]))
+        for i, frame in enumerate(frames):
+            # explanations = gradcam.get_explanation_batch([frame])
+            # explanation = explanations[0]
+
+            click = clicks[i]
+            frame_idx = click["frame-idx"]
+
+            explanation = load_gradcam_from_file(gradcam_file, video["name"], frame_idx)
+            explanation = undo_image_transform_clip(frame, explanation)
+            pos = GetPredictionGradCAM.get_position(frame, explanation)
+
             frame = frame / 255
-            frame = gradcam.show_cam_on_image(frame, explanation, use_rgb=True)
+            frame = MyGradCAM.show_cam_on_image(frame, explanation, use_rgb=True)
+            frame = add_location(frame, pos, color=(0, 255, 0))
+
+            error = evaluate1(click, pos)
+
+            st.markdown("Error: {}".format(error))
             st.image(frame)
 
     st.markdown("---")

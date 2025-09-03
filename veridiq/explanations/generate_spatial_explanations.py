@@ -223,6 +223,23 @@ def get_exddv_images():
             }
 
 
+def undo_image_transform_clip(frame, explanation):
+    S = 224
+    H, W = frame.shape[:2]
+    size1 = get_resize_output_image_size(
+        frame,
+        size=S,
+        default_to_square=False,
+    )
+    S1, S2 = explanation.shape
+    assert S == S1 == S2
+    dx = (size1[1] - S) // 2
+    dy = (size1[0] - S) // 2
+    explanation_out = np.zeros(size1, dtype=explanation.dtype)
+    explanation_out[dy : dy + S, dx : dx + S] = explanation
+    return cv2.resize(explanation_out, (W, H))
+
+
 @click.command()
 @click.option("-c", "--config", "config_name")
 def main(config_name):
