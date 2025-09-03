@@ -5,7 +5,6 @@ import random
 
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Optional
 
 from matplotlib import pyplot as plt
 from pathlib import Path
@@ -25,6 +24,7 @@ import torch
 from veridiq.data import AV1M
 from veridiq.extract_features import FeatureExtractor, load_video_frames
 from veridiq.utils import cache_json, cache_np, implies
+
 import veridiq.mymarkdown as md
 
 
@@ -43,6 +43,7 @@ SUBSAMPLING_FACTORS = {
     "VideoMAE": 2,
 }
 
+
 def load_video_frames_datum(datum):
     video_path = DATASET.get_video_path(datum["file"])
     return load_video_frames(video_path)
@@ -54,30 +55,6 @@ def pred_to_proba(score):
     # The logits for the two classes were `-score` and `score`, where `score` is `self.head(x)`.
     # This means that the probability of the positive class is given by: sigmoid(2 * score).
     return 1.0 / (1.0 + np.exp(-2 * score))
-
-
-def load_model_classifier(feature_extractor_type):
-    PATHS = {
-        "CLIP": "output/clip-linear/model-epoch=98.ckpt",
-        "FSFM": "output/fsfm-linear/model-epoch=98.ckpt",
-        "VideoMAE": "output/videomae-linear/model-epoch=99.ckpt",
-    }
-    DIMS = {
-        "CLIP": 768,
-        "FSFM": 768,
-        "VideoMAE": 1024,
-    }
-
-    path = PATHS[feature_extractor_type]
-    checkpoint = torch.load(path)
-
-    dim = DIMS[feature_extractor_type]
-    model = LinearModel(dim)
-
-    model.load_state_dict(checkpoint["state_dict"])
-    model.eval()
-    model.to(DEVICE)
-    return model
 
 
 def load_test_paths(feature_extractor_type):
@@ -328,11 +305,14 @@ def show_frames(preds, datum, my_grad_cam):
                 continue
 
             explanation = my_grad_cam.get_explanation_batch([frames[idx]])
-            cols[i].markdown(
-                "Grad-CAM · max score: {:.1f}".format(explanation[0].max())
-            )
+            explanation = explanation[0]
+            # explanation = undo_image_transform_clip(frames[idx], explanation)
+
+            cols[i].markdown("Grad-CAM · max score: {:.1f}".format(explanation.max()))
             explanation = my_grad_cam.show_cam_on_image(
-                frames[idx] / 255, explanation[0], use_rgb=True
+                frames[idx] / 255,
+                explanation,
+                use_rgb=True,
             )
             cols[i].image(explanation)
 
