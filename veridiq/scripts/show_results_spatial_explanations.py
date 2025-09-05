@@ -13,7 +13,6 @@ import streamlit as st
 from PIL import Image
 from tqdm import tqdm
 
-from veridiq import mylatex
 from veridiq.explanations.generate_spatial_explanations import (
     MyGradCAM,
     get_exddv_videos,
@@ -32,7 +31,7 @@ from veridiq.explanations.show_spatial_explanations import (
     load_video_frames,
 )
 from veridiq.explanations.utils import SCORE_LOADERS
-from veridiq import mylatex
+from veridiq.utils import latex as mylatex
 from veridiq.utils import cache_json, cache_image, transpose
 
 
