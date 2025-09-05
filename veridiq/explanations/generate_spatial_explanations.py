@@ -118,21 +118,35 @@ SIZES = {
 }
 
 
+def load_config(config_name):
+    config_dir = Path("veridiq/linear_probing/configs")
+    config_path = config_dir / (config_name + ".yaml")
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def load_model_full(config):
+    feature_extractor_type = config["data_info"]["feature_name"]
+    feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
+    assert isinstance(
+        feature_extractor, PerFrameFeatureExtractor
+    ), "Only PerFrameFeatureExtractor is currently supported."
+    feature_extractor = feature_extractor.model
+    model_classifier = load_model_classifier_from_config(config)
+
+    model_full = FullModel(feature_extractor, model_classifier)
+    model_full.eval()
+    model_full.to(DEVICE)
+
+    return model_full
+
+
 class MyGradCAM:
     def __init__(self, config):
         feature_extractor_type = config["data_info"]["feature_name"]
-        feature_extractor = FEATURE_EXTRACTORS[feature_extractor_type]()
-        assert isinstance(
-            feature_extractor, PerFrameFeatureExtractor
-        ), "Only PerFrameFeatureExtractor is currently supported."
-        feature_extractor = feature_extractor.model
-        model_classifier = load_model_classifier_from_config(config)
+        model_full = load_model_full(config)
 
-        model_full = FullModel(feature_extractor, model_classifier)
-        model_full.eval()
-        model_full.to(DEVICE)
-
-        self.transform_images = feature_extractor.transform
+        self.transform_images = model_full.feature_extractor.transform
         self.feature_extractor_type = feature_extractor_type
 
         target_layers = TARGET_LAYERS[feature_extractor_type](model_full)
@@ -149,10 +163,7 @@ class MyGradCAM:
 
     @classmethod
     def from_config_name(cls, config_name):
-        config_dir = Path("veridiq/linear_probing/configs")
-        config_path = config_dir / (config_name + ".yaml")
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+        config = load_config(config_name)
         return cls(config)
 
     def get_explanation_batch(self, images):
