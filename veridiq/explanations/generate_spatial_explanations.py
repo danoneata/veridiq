@@ -52,7 +52,8 @@ def load_model_classifier(feature_extractor_type):
     PATHS = {
         "clip": "output/clip-linear/model-epoch=98.ckpt",
         "fsfm": "output/fsfm-linear/model-epoch=98.ckpt",
-        "videomae": "output/videomae-linear/model-epoch=99.ckpt",
+        # "videomae": "output/videomae-linear/model-epoch=99.ckpt",
+        "videomae": "/data/av-datasets/ckpts_linear_probing/ckpts/video_mae/model-epoch=99.ckpt",
     }
     DIMS = {
         "clip": 768,
