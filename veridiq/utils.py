@@ -5,6 +5,8 @@ import json
 import os
 import pickle
 
+from PIL import Image
+
 import numpy as np
 import pandas as pd
 
@@ -77,6 +79,21 @@ def cache_pickle(path, func, *args, **kwargs):
         with open(path, "wb") as f:
             pickle.dump(result, f)
         return result
+
+
+def cache_image(path, func, *args, **kwargs):
+    if os.path.exists(path):
+        image = Image.open(path)
+        return np.array(image)
+    else:
+        result = func(*args, **kwargs)
+        image = Image.fromarray(result)
+        image.save(path)
+        return result
+
+
+def transpose(matrix: List[List[A]]) -> List[List[A]]:
+    return list(map(list, zip(*matrix)))
 
 
 class multimap(defaultdict):

@@ -17,12 +17,12 @@ from veridiq.explanations.evaluate_spatial_explanations import (
 from veridiq.extract_features import load_video_frames
 from veridiq.explanations.generate_spatial_explanations import (
     MyGradCAM,
+    get_exddv_videos,
     undo_image_transform_clip,
 )
-from veridiq.explanations.utils import load_predictions
+from veridiq.explanations.utils import SCORE_LOADERS
 
 
-st.set_page_config(layout="wide")
 CONFIG_NAME = "exddv-clip"
 
 
@@ -121,91 +121,104 @@ class KeySorter(Sorter):
 #         return "{}={}".format(self.key, self.value)
 
 
-videos = ExDDV.get_videos()
-videos = [v for v in videos if v["split"] == "test" and v["label"] == "fake"]
-num_videos = len(videos)
-preds = load_predictions()
+if __name__ == "__main___":
+    st.set_page_config(layout="wide")
+    NUM_COLS = 3
 
-for v in videos:
-    v["pred-score"] = preds[v["name"]]["pred-score"]
+    videos = get_exddv_videos()
+    num_videos = len(videos)
 
-with st.sidebar:
-    sorters = [
-        NoSorter(),
-        KeySorter("pred-score", reverse=True),
-        KeySorter("pred-score", reverse=False),
-        RandomSorter(),
-    ]
-    sorter = st.selectbox("Sort by", options=sorters, index=1)
-    num_to_show = st.number_input(
-        "Number of videos to show",
-        min_value=1,
-        max_value=num_videos,
-        value=10,
-        step=5,
-    )
+    video_score_loader = SCORE_LOADERS["video"](CONFIG_NAME)
+    frame_score_loader = SCORE_LOADERS["frame"](CONFIG_NAME)
 
-    st.markdown("---")
-    st.markdown(
-        "Showing only fake videos from the test split. The total number of such videos is {}.".format(
-            num_videos
+    for v in videos:
+        v["pred-score"] = video_score_loader(v["name"])
+        frame_scores = [frame_score_loader(v["name"], c["frame-idx"]) for c in v["clicks"]]
+        v["pred-score-frame-max"] = max(frame_scores)
+
+    with st.sidebar:
+        sorters = [
+            NoSorter(),
+            KeySorter("pred-score", reverse=True),
+            KeySorter("pred-score", reverse=False),
+            KeySorter("pred-score-frame-max", reverse=True),
+            RandomSorter(),
+        ]
+        sorter = st.selectbox("Sort by", options=sorters, index=1)
+        num_to_show = st.number_input(
+            "Number of videos to show",
+            min_value=1,
+            max_value=num_videos,
+            value=10,
+            step=5,
         )
-    )
 
+        st.markdown("---")
+        st.markdown(
+            "Showing only fake videos from the test split. The total number of such videos is {}.".format(
+                num_videos
+            )
+        )
 
-num_cols = 3
-videos = sorter(videos)
+    videos = sorter(videos)
 
-# gradcam = load_gradcam()
-gradcam_file = load_gradcam_file()
+    # gradcam = load_gradcam()
+    gradcam_file = load_gradcam_file()
 
-for video in videos[:10]:
-    clicks = video["clicks"]
+    for video in videos[:10]:
+        clicks = video["clicks"]
 
-    clicks = sorted(clicks, key=lambda x: x["frame-idx"])
-    frame_idxs = [click["frame-idx"] for click in clicks]
+        clicks = sorted(clicks, key=lambda x: x["frame-idx"])
+        frame_idxs = [click["frame-idx"] for click in clicks]
 
-    frames = load_video_frames(video["path"])
-    frames = [frame for i, frame in enumerate(frames) if i in frame_idxs]
-    frames = [add_location(frame, click) for frame, click in zip(frames, clicks)]
+        frames = load_video_frames(video["path"])
+        frames = [frame for i, frame in enumerate(frames) if i in frame_idxs]
+        frames = [add_location(frame, click) for frame, click in zip(frames, clicks)]
 
-    st.markdown("### `{}` · score: {:.1f}".format(video["name"], video["pred-score"]))
+        st.markdown(
+            "### `{}` · score: {:.1f}".format(video["name"], video["pred-score"])
+        )
 
-    col1, col2, col3 = st.columns(num_cols)
+        col1, col2, col3 = st.columns(num_cols)
 
-    with col1:
-        st.markdown("Video")
-        st.markdown("")
-        st.video(video["path"])
-        st.markdown("Textual annotation:\n > {}".format(video["text"]))
-        # st.markdown("Frame indices:\n > {}".format(", ".join(map(str, frame_idxs))))
+        with col1:
+            st.markdown("Video")
+            st.markdown("")
+            st.video(video["path"])
+            st.markdown("Textual annotation:\n > {}".format(video["text"]))
+            # st.markdown("Frame indices:\n > {}".format(", ".join(map(str, frame_idxs))))
 
-    with col2:
-        st.markdown("Frame annotations")
-        for frame_idx, frame in zip(frame_idxs, frames):
-            st.markdown("Frame: {}".format(frame_idx))
-            st.image(frame)
+        with col2:
+            st.markdown("Frame annotations")
+            for frame_idx, frame in zip(frame_idxs, frames):
+                st.markdown("Frame: {}".format(frame_idx))
+                st.image(frame)
 
-    with col3:
-        st.markdown("Explanations")
-        for i, frame in enumerate(frames):
-            # explanations = gradcam.get_explanation_batch([frame])
-            # explanation = explanations[0]
+        with col3:
+            st.markdown("Explanations")
+            for i, frame in enumerate(frames):
+                # explanations = gradcam.get_explanation_batch([frame])
+                # explanation = explanations[0]
 
-            click = clicks[i]
-            frame_idx = click["frame-idx"]
+                click = clicks[i]
+                frame_idx = click["frame-idx"]
 
-            explanation = load_gradcam_from_file(gradcam_file, video["name"], frame_idx)
-            explanation = undo_image_transform_clip(frame, explanation)
-            pos = GetPredictionGradCAM.get_position(frame, explanation)
+                explanation = load_gradcam_from_file(
+                    gradcam_file,
+                    video["name"],
+                    frame_idx,
+                )
+                explanation = undo_image_transform_clip(frame, explanation)
+                pos = GetPredictionGradCAM.get_position(frame, explanation)
 
-            frame = frame / 255
-            frame = MyGradCAM.show_cam_on_image(frame, explanation, use_rgb=True)
-            frame = add_location(frame, pos, color=(0, 255, 0))
+                frame = frame / 255
+                frame = MyGradCAM.show_cam_on_image(frame, explanation, use_rgb=True)
+                frame = add_location(frame, pos, color=(0, 255, 0))
 
-            error = evaluate1(click, pos)
+                error = evaluate1(click, pos)
+                score = frame_score_loader(video["name"], frame_idx)
 
-            st.markdown("Error: {}".format(error))
-            st.image(frame)
+                st.markdown("Error: {:.3f} · Score: {:.3f}".format(error, score))
+                st.image(frame)
 
-    st.markdown("---")
+        st.markdown("---")
