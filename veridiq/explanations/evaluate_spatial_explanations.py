@@ -94,16 +94,20 @@ def evaluate1(click, prediction):
     return mean_absolute_error(true, pred)
 
 
-@click.command()
-@click.option("-p", "--pred", "pred_type", type=click.Choice(GET_PREDICTORS.keys()))
-def main(pred_type):
+def evaluate(pred_type):
     get_prediction_video = GET_PREDICTORS[pred_type]()
     results = [
         evaluate1(click, get_prediction_video(video, click))
         for video in get_exddv_videos()
         for click in video["clicks"]
     ]
-    print(np.mean(results))
+    return np.mean(results)
+
+
+@click.command()
+@click.option("-p", "--pred", "pred_type", type=click.Choice(GET_PREDICTORS.keys()))
+def main(pred_type):
+    print(evaluate(pred_type))
 
 
 if __name__ == "__main__":
