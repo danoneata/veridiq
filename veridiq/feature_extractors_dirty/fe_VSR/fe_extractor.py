@@ -41,14 +41,14 @@ class InferencePipeline(torch.nn.Module):
         transcript = self.model.infer(data)
         return transcript
 
-    def extract_features(self, data_filename, landmarks_filename=None, extract_resnet_feats=False):
+    def extract_features(self, data_filename, audio_filename, landmarks_filename=None, extract_resnet_feats=False):
         assert os.path.isfile(data_filename), f"data_filename: {data_filename} does not exist."
         try:
             landmarks = self.process_landmarks(data_filename, landmarks_filename)
         except Exception as e:
             print(e, " passing landmarks as None")
             landmarks = None
-        data = self.dataloader.load_data(data_filename, landmarks)
+        data = self.dataloader.load_data(data_filename, audio_filename, landmarks)
         
         with torch.no_grad():
             if isinstance(data, tuple):
@@ -99,30 +99,39 @@ def main(split):
     print("Split: ", SPLIT)
     None_counter = 0
 
-    modality = "video"
-    model_conf = "LRS2_V_WER26.1/model.json"  
-    model_path = "LRS2_V_WER26.1/model.pth"
+    modality = "audiovisual"
+    model_conf = "LRS3_AV_WER0.9/model.json"  
+    model_path = "LRS3_AV_WER0.9/model.pth"
     pipeline = InferencePipeline(modality, model_path, model_conf, face_track=True)
 
-    path_to_features_root = f"/data/av-extracted-features/bitdf_auto_avsr/{modality}/"
+    path_to_features_root = f"/data/audio-video-deepfake-4/av-extracted-features-2/av1m_auto_avsr_multimodal/{SPLIT}/"
     print(f"Saving at {path_to_features_root}")
     if modality == "audio":
-        path_to_crops = f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/" # get audio (.wav)
+        path_to_crops = "/data/avlips/AVLips/" # get audio (.wav)
     else:
-        path_to_crops = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
+        path_to_crops = f"/data/audio-video-deepfake/ASR/preprocessed/real+fake/{SPLIT}"
+    
+    path_to_audios = f"/data/av-deepfake-1m/av_deepfake_1m/val/"
 
-    csv1_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/av_deepfake_1m/{SPLIT}_labels.csv")
     # csv2_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv')
     files = sorted(list(csv1_paths))#.union(csv2_paths)))
+    print(len(files))
 
     # files = sorted([os.path.join(dp, f) for dp, dn, filenames in os.walk(VIDEOS_PATH) for f in filenames])
     # print(len(files))
     # start_index, end_index = get_machine_indices(machine_id, end_idx = len(files)+2, num_machines=5)
     # print(start_index, end_index)
 
+    # AV1M
+    # features_root_path = "/data/av-deepfake-1m/av_deepfake_1m/train/"
+    # save_path = f"/data/audio-video-deepfake-3/ASR/preprocessed_audio/real/{SPLIT}/"
+    # csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv")
+    
+
     for i, file_path in enumerate(tqdm(files)): #[start_index:end_index])):
         # file_path = file_path.replace("FakeAVCeleb/", "")
-        file_path = file_path.replace("/feats/", "/videos/")
+        # file_path = file_path.replace("/feats/", "/videos/")
         
         if modality == "audio":
             file_path = file_path.replace(".mp4", ".wav").replace("/videos/", "/processed/")
@@ -132,11 +141,13 @@ def main(split):
             mouth_roi_path = os.path.join(path_to_crops, file_path)
             save_path = os.path.join(path_to_features_root, file_path.replace(".mp4", ".npz"))
 
+            audio_path = os.path.join(path_to_audios, file_path)
+
         if os.path.isfile(save_path):
             continue
 
-        if "socialmedia" not in file_path:
-            continue
+        # if "socialmedia" not in file_path:
+        #     continue
         # else:
         #     file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
 
@@ -146,7 +157,7 @@ def main(split):
             #     og_path = os.path.join(f"/data/veridiq-shared-pg/dataset/filtered_tracks/", file_path.replace("/processed/", "/videos/").replace(".wav", ".mp4"))
             #     ffmpeg.input(og_path).output(mouth_roi_path).run()
             #     print("used ffmpeg ", mouth_roi_path)
-            feature = pipeline.extract_features(mouth_roi_path)
+            feature = pipeline.extract_features(mouth_roi_path, audio_path)
             feature = feature.cpu().detach().numpy()
 
         except Exception as e:
@@ -161,8 +172,8 @@ def main(split):
     print("none counter: ", None_counter)
 
 if __name__ == "__main__":
-    main(None)
+    # main(None)
     # main("train")
     # main("val")
-    # main("test")
+    main("test")
     

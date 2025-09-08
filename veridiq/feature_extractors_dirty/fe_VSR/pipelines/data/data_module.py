@@ -8,10 +8,12 @@ import torch
 import torchaudio
 import torchvision
 from .transforms import AudioTransform, VideoTransform
-
+import subprocess
+import numpy as np
 
 class AVSRDataLoader:
     def __init__(self, modality, speed_rate=1, transform=True, detector="retinaface", convert_gray=True):
+        torchaudio.set_audio_backend("ffmpeg")
         self.modality = modality
         self.transform = transform
         if self.modality in ["audio", "audiovisual"]:
@@ -26,7 +28,7 @@ class AVSRDataLoader:
             self.video_transform = VideoTransform(speed_rate=speed_rate)
 
 
-    def load_data(self, data_filename, landmarks=None, transform=True):
+    def load_data(self, data_filename, audio_filename, landmarks=None, transform=True):
         if self.modality == "audio":
             audio, sample_rate = self.load_audio(data_filename)
             audio = self.audio_process(audio, sample_rate)
@@ -38,7 +40,7 @@ class AVSRDataLoader:
             return self.video_transform(video) if self.transform else video
         if self.modality == "audiovisual":
             rate_ratio = 640
-            audio, sample_rate = self.load_audio(data_filename)
+            audio, sample_rate = self.load_audio(audio_filename)
             audio = self.audio_process(audio, sample_rate)
             video = self.load_video(data_filename)
             video = self.video_process(video, landmarks)
@@ -53,6 +55,22 @@ class AVSRDataLoader:
 
 
     def load_audio(self, data_filename):
+        # try:
+        #     # Try with torchaudio first
+        #     return torchaudio.load(data_filename, normalize=True)
+        # except Exception as e:
+        #     # Fallback: extract audio with ffmpeg
+        #     cmd = [
+        #         "ffmpeg", "-i", data_filename,
+        #         "-f", "s16le",
+        #         "-acodec", "pcm_s16le",
+        #         "-ac", "1",
+        #         "-"
+        #     ]
+        #     out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
+        #     audio = np.frombuffer(out.stdout, np.int16).astype(np.float32) / 32768.0
+        #     return torch.from_numpy(audio).unsqueeze(0)
+
         waveform, sample_rate = torchaudio.load(data_filename, normalize=True)
         return waveform, sample_rate
 

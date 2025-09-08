@@ -17,7 +17,7 @@ class LinearModel(L.LightningModule):
         else:
             self.head = nn.Linear(self.feats_dim, 1)
 
-    def forward(self, input_feats):
+    def forward(self, input_feats, per_frame=False):
         video_feats, audio_feats = input_feats[0], input_feats[1]
 
         if self.input_type == "both":
@@ -31,10 +31,17 @@ class LinearModel(L.LightningModule):
 
         output = self.head(fused_features)[:, :, 0]
 
-        return torch.logsumexp(output, dim=-1)
+        if per_frame:
+            return torch.logsumexp(output, dim=-1), output
+        else:
+            return torch.logsumexp(output, dim=-1)
 
     def predict_scores(self, video_feats, audio_feats):
         scores = self.forward((video_feats, audio_feats))
+        return scores
+
+    def predict_scores_per_frame(self, video_feats, audio_feats):
+        scores = self.forward((video_feats, audio_feats), per_frame=True)
         return scores
 
     def training_step(self, batch, batch_idx):

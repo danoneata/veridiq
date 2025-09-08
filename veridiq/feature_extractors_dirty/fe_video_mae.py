@@ -72,9 +72,14 @@ def main(split=None):
     # input_root = f'/data/av-datasets/datasets/FakeAVCeleb/'
 
     # BitDF
-    csv_path = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv"
-    output_root = "/data/av-extracted-features/bitdf_videomae/"
-    input_root = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
+    # csv_path = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv"
+    # output_root = "/data/av-extracted-features/bitdf_videomae/"
+    # input_root = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
+
+    # AVLips
+    csv_path = "/data/avlips/AVLips/test_labels.csv"
+    output_root = "/data/av-extracted-features/avlips_videomae/"
+    input_root = "/data/avlips/AVLips/"
 
     csv_file = f"{csv_path}"
     df = pd.read_csv(csv_file)
@@ -93,13 +98,13 @@ def main(split=None):
                 
         # path = replace_ethnicity(path_original)
         out_path = os.path.join(output_root,  path_original[:-4]) 
-        if os.path.exists(out_path):
-            continue
+        # if os.path.exists(out_path):
+        #     continue
 
-        if "socialmedia" not in path_original:
-            continue
-        else:
-            input_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
+        # if "socialmedia" not in path_original:
+        #     continue
+        # else:
+        #     input_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
 
 
         video_path_input = input_root + path_original # or path for FAVC
@@ -115,7 +120,7 @@ def main(split=None):
         np.savez_compressed(out_path + '.npz', visual=features)
         if split=="test":
             all_features.append(features)
-            paths.append(path)
+            paths.append(path_original)
 
     if split=="test":
         all_features = np.array(all_features, dtype=object)
@@ -124,7 +129,7 @@ def main(split=None):
         np.save(os.path.join(output_root,  "test", "paths.npy"),  paths, allow_pickle=True)
 
 if __name__ == "__main__":
-    main(None)
+    # main(None)
     # main("train")
     # main("val")
-    # main("test")
+    main("test")

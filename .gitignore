@@ -7,3 +7,10 @@ ckpts
 outputs
 train_config_*
 test_config_*
+checkpoints
+**/LRS2_V_WER26.1
+**/LRS3_A_WER1.0
+**/LRS3_AV_WER0.9
+**/LRS3_V_WER19.1
+**/LRS3_V_WER32.3
+

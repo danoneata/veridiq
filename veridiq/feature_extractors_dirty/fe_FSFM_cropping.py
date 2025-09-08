@@ -235,20 +235,26 @@ def main(
     # save_path_root = f"/data/av-extracted-features/favc_fsfm_preprocessed/"
 
     # BitDF
-    file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
-    file_paths = pd.read_csv(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
-    file_paths = file_paths["full_file_path"].tolist()
-    save_path_root = f"/data/av-extracted-features/bitdf_fsfm_preprocessed/"
+    # file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
+    # file_paths = pd.read_csv(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    # file_paths = file_paths["full_file_path"].tolist()
+    # save_path_root = f"/data/av-extracted-features/bitdf_fsfm_preprocessed/"
+
+    # AVLips
+    file_paths_root = "/data/avlips/AVLips/"
+    file_paths = pd.read_csv("/data/avlips/AVLips/test_labels.csv")
+    file_paths = file_paths["path"].tolist()
+    save_path_root = f"/data/av-extracted-features/avlips_fsfm_preprocessed/"
 
     for i, file_path in enumerate(tqdm(file_paths)): #[5000*(idx-1):5000*idx+1])):
         # file_path = file_path.replace("FakeAVCeleb/", "")
-        file_path = file_path.replace("/feats/", "/videos/")
+        # file_path = file_path.replace("/feats/", "/videos/")
         out_file_path = save_path_root + file_path
 
-        if "socialmedia" not in file_path:
-            continue
-        else:
-            file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
+        # if "socialmedia" not in file_path:
+        #     continue
+        # else:
+        #     file_paths_root = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
 
         # file_path = replace_ethnicity(file_path)
         

@@ -94,6 +94,8 @@ class AV1M_trainval_dataset(Dataset):
                 feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npy"), allow_pickle=True)
             except FileNotFoundError:
                 feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz.npy"), allow_pickle=True)
+        except:
+            print(os.path.join(self.feats_dir, row["path"][:-4] + ".npz"))
 
         label = int(row["label"])
 
@@ -132,6 +134,32 @@ class AV1M_trainval_dataset(Dataset):
 
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
 
+def get_frame_regions(manipulated_regions, fps=25):
+    frame_regions = []
+    for region in manipulated_regions:
+        start_frame = int(region[0] * fps)
+        end_frame = int(region[1] * fps)
+        frame_regions.append(list(range(start_frame, end_frame + 1)))
+    return frame_regions
+    
+def populate_gt(output_len, manipulated_frame_regions):
+    gt = [0] * output_len
+    
+    if len(manipulated_frame_regions) == 0:
+        return gt
+    
+    for sublist in manipulated_frame_regions:
+        max_index = max(sublist)
+        if max_index >= output_len:
+            continue
+            
+        for index in sublist:
+            if index >= output_len:
+                continue
+            else:
+                gt[index] = 1
+                
+    return gt
 
 class AV1M_test_dataset(Dataset):
     def __init__(self, config):
@@ -191,9 +219,10 @@ class AV1M_test_dataset(Dataset):
                 df.drop(remove_indices, inplace=True)
 
                 # for auto-avsr video - remove None features
-                mask = np.array([f is not None for f in self.video_feats])
-                self.paths = self.paths[mask]
-                self.video_feats = self.video_feats[mask]
+                if self.video_feats is not None:
+                    mask = np.array([f is not None for f in self.video_feats])
+                    self.paths = self.paths[mask]
+                    self.video_feats = self.video_feats[mask]
 
         elif self.config["dataset_name"] == "FAVC":
             df = pd.read_csv(os.path.join(self.csv_root_path, "test_split.csv"))
@@ -228,13 +257,42 @@ class AV1M_test_dataset(Dataset):
         else:
             raise ValueError("Wrong dataset_name!")
 
-        labels = {}
-        for path in self.paths:
-            row = df.loc[df['path'] == path]
-            if len(row.index) != 1:
-                raise ValueError("Multiple or no entries in test_labels.csv for a single path!")
-            row = row.iloc[0]
-            labels[path] = int(row['label'])
+        if self.config["frame_level"]:
+            local_manipulations = {}
+            for entry in metadata:
+                if entry['file'] in self.paths:
+                    path = entry['file']
+                    audio_manipulated_regions = entry['audio_fake_segments']
+                    video_manipulated_regions = entry['visual_fake_segments']
+                            
+                    video_frame_regions = get_frame_regions(video_manipulated_regions)
+                    audio_frame_regions = get_frame_regions(audio_manipulated_regions)
+
+                    local_manipulations[path] = torch.tensor(populate_gt(entry['video_frames'], video_frame_regions + audio_frame_regions))
+                    
+                    # subsample for videoMAE ↓
+                    # def subsample_vector_to_match_videomae(vector, total_video_frames, chunk_size=16, num_segments=8):
+                    #     # Reshape to (num_chunks, chunk_size, audio_dim)
+                    #     num_chunks = total_video_frames // chunk_size
+                    #     vector = vector[:num_chunks * chunk_size]  # trim extra frames if needed
+                        
+                    #     chunks = vector.reshape(num_chunks, chunk_size, -1)
+
+                    #     # Get evenly spaced indices
+                    #     idx = np.linspace(0, chunk_size - 1, num_segments).astype(int)
+
+                    #     # Subsample and return (num_chunks * num_segments, audio_dim)
+                    #     return chunks[:, idx].reshape(-1, chunks.shape[-1])
+                    # local_manipulations[path] = subsample_vector_to_match_videomae(local_manipulations[path], entry['video_frames'])
+            labels = local_manipulations
+        else:
+            labels = {}
+            for path in self.paths:
+                row = df.loc[df['path'] == path]
+                if len(row.index) != 1:
+                    raise ValueError("Multiple or no entries in test_labels.csv for a single path!")
+                row = row.iloc[0]
+                labels[path] = int(row['label'])
 
         return labels
 
@@ -400,8 +458,8 @@ class PerFileDataset(Dataset):
 
 
 class DanDataset(Dataset):
-    from veridiq.data import DATASETS as DATASETS_DAN
-    from veridiq.extract_features import FEATURE_DIR
+    # from veridiq.data import DATASETS as DATASETS_DAN
+    # from veridiq.extract_features import FEATURE_DIR
 
     def __init__(self, split, sub_dataset_name, feature_name):
         Dataset = self.DATASETS_DAN[sub_dataset_name]

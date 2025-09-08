@@ -14,9 +14,11 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from veridiq.linear_probing.datasets import load_data
-from veridiq.linear_probing.model import LinearModel
+# from veridiq.linear_probing.datasets import load_data
+# from veridiq.linear_probing.model import LinearModel
 
+from datasets import load_data
+from model import LinearModel
 
 def init_callbacks(config):
     # LOGGER
@@ -110,32 +112,61 @@ def test(config):
     all_scores = np.array([])
     all_labels = np.array([])
     all_paths = np.array([])
+    if config["data_info"]["frame_level"]:
+        all_frame_level_auc = []
+        
     with torch.no_grad():
         for batch in tqdm.tqdm(test_dl):
             video_feats, audio_feats, labels, paths = batch
             video_feats, audio_feats = video_feats.to("cuda"), audio_feats.to("cuda")
 
-            scores = model.predict_scores(video_feats, audio_feats)
+            if config["data_info"]["frame_level"]:
+                scores, local_scores = model.predict_scores_per_frame(video_feats, audio_feats)
+                
+                local_scores = local_scores[0].cpu().numpy()
+                labels = labels.cpu().numpy().squeeze()
+                length = min(len(local_scores), len(labels))
+                local_scores = local_scores[:length]
+                labels = labels[:length]
 
-            all_scores = np.concatenate((all_scores, scores.cpu().numpy()), axis=0)
-            all_labels = np.concatenate((all_labels, labels.cpu().numpy()), axis=0)
-            all_paths = np.concatenate((all_paths, paths), axis=0)
+                try:
+                    frame_level_auc = roc_auc_score(y_score=local_scores, y_true=labels)
+                    all_frame_level_auc.append(frame_level_auc)
+                except ValueError:
+                    pass
+            
+                all_scores = np.concatenate((all_scores, local_scores), axis=0)
+                all_labels = np.concatenate((all_labels, labels), axis=0)
+                all_paths = np.concatenate((all_paths, paths), axis=0)
+
+            else:
+                scores = model.predict_scores(video_feats, audio_feats)
+
+                all_scores = np.concatenate((all_scores, scores.cpu().numpy()), axis=0)
+                all_labels = np.concatenate((all_labels, labels.cpu().numpy()), axis=0)
+                all_paths = np.concatenate((all_paths, paths), axis=0)
 
     path_output = get_output_path(config)
     os.makedirs(path_output, exist_ok=True)
 
-    pd.DataFrame({
-        "paths": all_paths,
-        "scores": all_scores,
-        "labels": all_labels
-    }).to_csv(os.path.join(path_output, "results.csv"), index=False)
+    if not config["data_info"]["frame_level"]:
+        pd.DataFrame({
+            "paths": all_paths,
+            "scores": all_scores,
+            "labels": all_labels
+        }).to_csv(os.path.join(path_output, "results.csv"), index=False)
+
     with open(os.path.join(path_output, "tested_config.yaml"), "w") as f:
         yaml.safe_dump(config, f)
 
     with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
-        f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
-        f.write(f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n")
-
+        if config["data_info"]["frame_level"]:
+            f.write(f"AUC-frame-level: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
+            f.write(f"AUC-frame-level-avg: {np.average(all_frame_level_auc)}\n")
+        else:
+            f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
+            f.write(f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n")
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

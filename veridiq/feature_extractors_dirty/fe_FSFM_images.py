@@ -168,10 +168,16 @@ def main(
     # save_path_root = f"/data/av-extracted-features/favc_fsfm/"
 
     # BitDF
-    file_paths_root = f"/data/av-extracted-features/bitdf_fsfm_preprocessed/"
-    file_paths = pd.read_csv(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
-    file_paths = file_paths["full_file_path"].tolist()
-    save_path_root = f"/data/av-extracted-features/bitdf_fsfm/"
+    # file_paths_root = f"/data/av-extracted-features/bitdf_fsfm_preprocessed/"
+    # file_paths = pd.read_csv(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    # file_paths = file_paths["full_file_path"].tolist()
+    # save_path_root = f"/data/av-extracted-features/bitdf_fsfm/"
+
+    # AVLips
+    file_paths_root = "/data/av-extracted-features/avlips_fsfm_preprocessed/"
+    file_paths = pd.read_csv("/data/avlips/AVLips/test_labels.csv")
+    file_paths = file_paths["path"].tolist()
+    save_path_root = f"/data/av-extracted-features/avlips_fsfm/"
 
 
     os.makedirs(os.path.dirname(save_path_root), exist_ok=True)
@@ -203,11 +209,9 @@ def main(
     # idx = 7
     # print(idx, 6500*(idx-1),6500*idx+1)
     for i, file_path in enumerate(tqdm(file_paths)): #[6500*(idx-1):6500*idx+1])):
-        if i < 6000:
-            continue
         # file_path = file_path.replace(".mp4", "_roi.mp4")
         # file_path = file_path.replace("FakeAVCeleb/", "")
-        file_path = file_path.replace("/feats/", "/videos/")
+        # file_path = file_path.replace("/feats/", "/videos/")
         save_path = save_path_root + file_path.replace(".mp4", ".npz")
         if os.path.exists(save_path):
             continue

@@ -85,9 +85,14 @@ if __name__ == "__main__":
     # csv3_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/test_split.csv")
 
     # BitDF
-    features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
-    save_path = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
-    csv1_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    # features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
+    # save_path = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
+    # csv1_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+
+    # AVLips
+    features_root_path = "/data/avlips/AVLips/"
+    save_path = f"/data/av-extracted-features/avlips_auto_avsr_preprocessed/"
+    csv1_paths = load_csv_paths("/data/avlips/AVLips/test_labels.csv")
 
     # csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/av_deepfake_1m/{SPLIT}_labels.csv")
     # csv2_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv')
@@ -103,15 +108,15 @@ if __name__ == "__main__":
 
     for i, file_path in enumerate(tqdm(files[start_index:end_index])):
         # file_path = file_path.replace("FakeAVCeleb/", "")
-        file_path = file_path.replace("/feats/", "/videos/")
+        # file_path = file_path.replace("/feats/", "/videos/")
         save_video_path = save_path + file_path
         
         # file_path = replace_ethnicity(file_path)
         
-        if "socialmedia" not in file_path:
-            continue
-        else:
-            features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
+        # if "socialmedia" not in file_path:
+        #     continue
+        # else:
+        #     features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
 
 
         original_video_path = features_root_path + file_path
