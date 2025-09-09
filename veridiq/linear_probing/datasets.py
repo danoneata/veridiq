@@ -149,9 +149,10 @@ def populate_gt(output_len, manipulated_frame_regions):
         return gt
     
     for sublist in manipulated_frame_regions:
-        max_index = max(sublist)
-        if max_index >= output_len:
-            continue
+        # include the manipulations at the end of the video, even if some of it exceeds the output_len
+        # max_index = max(sublist)
+        # if max_index >= output_len:
+        #     continue
             
         for index in sublist:
             if index >= output_len:
@@ -271,19 +272,20 @@ class AV1M_test_dataset(Dataset):
                     local_manipulations[path] = torch.tensor(populate_gt(entry['video_frames'], video_frame_regions + audio_frame_regions))
                     
                     # subsample for videoMAE ↓
-                    # def subsample_vector_to_match_videomae(vector, total_video_frames, chunk_size=16, num_segments=8):
-                    #     # Reshape to (num_chunks, chunk_size, audio_dim)
-                    #     num_chunks = total_video_frames // chunk_size
-                    #     vector = vector[:num_chunks * chunk_size]  # trim extra frames if needed
-                        
-                    #     chunks = vector.reshape(num_chunks, chunk_size, -1)
+                    if "Video_MAE" in self.root_path:
+                        def subsample_vector_to_match_videomae(vector, total_video_frames, chunk_size=16, num_segments=8):
+                            # Reshape to (num_chunks, chunk_size, audio_dim)
+                            num_chunks = total_video_frames // chunk_size
+                            vector = vector[:num_chunks * chunk_size]  # trim extra frames if needed
+                            
+                            chunks = vector.reshape(num_chunks, chunk_size, -1)
 
-                    #     # Get evenly spaced indices
-                    #     idx = np.linspace(0, chunk_size - 1, num_segments).astype(int)
+                            # Get evenly spaced indices
+                            idx = np.linspace(0, chunk_size - 1, num_segments).astype(int)
 
-                    #     # Subsample and return (num_chunks * num_segments, audio_dim)
-                    #     return chunks[:, idx].reshape(-1, chunks.shape[-1])
-                    # local_manipulations[path] = subsample_vector_to_match_videomae(local_manipulations[path], entry['video_frames'])
+                            # Subsample and return (num_chunks * num_segments, audio_dim)
+                            return chunks[:, idx].reshape(-1, chunks.shape[-1])
+                        local_manipulations[path] = subsample_vector_to_match_videomae(local_manipulations[path], entry['video_frames'])
             labels = local_manipulations
         else:
             labels = {}
