@@ -387,12 +387,15 @@ class PerFileDataset(Dataset):
         self.root_path = self.config["root_path"]
         self.csv_root_path = self.config["csv_root_path"]
 
-        self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
-        self.feats_dir = self.root_path
-        self.df['path'] = self.df['full_file_path']
+        if config["dataset_name"] == "BitDF":
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
+            self.df['path'] = self.df['full_file_path']
+            self.df = self.df[self.df['original_split'] != "train"]
+            self.df = self.df[self.df["label"] != "unknown"]
+        else:
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv"))
 
-        self.df = self.df[self.df['original_split'] != "train"]
-        self.df = self.df[self.df["label"] != "unknown"]
+        self.feats_dir = self.root_path
 
         if "files_to_remove" in config.keys():
             with open(config["files_to_remove"], "r") as f:
@@ -416,12 +419,15 @@ class PerFileDataset(Dataset):
             except FileNotFoundError:
                 feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz.npy"), allow_pickle=True)
 
-        if row["label"] == "real":
-            label = 0
-        elif row["label"] == "fake":
-            label = 1
+        if self.config["dataset_name"] == "BitDF":
+            if row["label"] == "real":
+                label = 0
+            elif row["label"] == "fake":
+                label = 1
+            else:
+                raise ValueError("only real or fake!")
         else:
-            raise ValueError("only real or fake!")
+            label = int(row["label"])
 
         if self.config["input_type"] == "both":
             video = feats['visual']
@@ -493,7 +499,7 @@ def load_data(config, test=False):
     if test:
         if config["dataset_name"] == "FAVC_old":
             test_ds = FakeAVCeleb_Dataset(config, split="test")
-        elif config["dataset_name"] == "BitDF":
+        elif config["dataset_name"] == "BitDF" or config["dataset_name"] == "AVLips":
             test_ds = PerFileDataset(config)
         elif config["dataset_name"] == "DanDataset":
             config_rest = dissoc(config, "dataset_name")

@@ -112,7 +112,7 @@ def test(config):
     all_scores = np.array([])
     all_labels = np.array([])
     all_paths = np.array([])
-    if config["data_info"]["frame_level"]:
+    if "frame_level" in config["data_info"].keys() and config["data_info"]["frame_level"]:
         all_frame_level_auc = []
         
     with torch.no_grad():
@@ -120,7 +120,7 @@ def test(config):
             video_feats, audio_feats, labels, paths = batch
             video_feats, audio_feats = video_feats.to("cuda"), audio_feats.to("cuda")
 
-            if config["data_info"]["frame_level"]:
+            if "frame_level" in config["data_info"].keys() and config["data_info"]["frame_level"]:
                 scores, local_scores = model.predict_scores_per_frame(video_feats, audio_feats)
                 
                 local_scores = local_scores[0].cpu().numpy()
@@ -149,7 +149,7 @@ def test(config):
     path_output = get_output_path(config)
     os.makedirs(path_output, exist_ok=True)
 
-    if not config["data_info"]["frame_level"]:
+    if not "frame_level" in config["data_info"].keys() or not config["data_info"]["frame_level"]:
         pd.DataFrame({
             "paths": all_paths,
             "scores": all_scores,
@@ -160,7 +160,7 @@ def test(config):
         yaml.safe_dump(config, f)
 
     with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
-        if config["data_info"]["frame_level"]:
+        if "frame_level" in config["data_info"].keys() and config["data_info"]["frame_level"]:
             f.write(f"AUC-frame-level: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
             f.write(f"AUC-frame-level-avg: {np.average(all_frame_level_auc)}\n")
         else:
