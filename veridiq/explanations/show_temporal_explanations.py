@@ -1,3 +1,4 @@
+import json
 import pdb
 import random
 
@@ -6,9 +7,11 @@ import h5py
 import numpy as np
 import pandas as pd
 import streamlit as st
+import seaborn as sns
 import torch
 
 from matplotlib import pyplot as plt
+from scipy.signal import find_peaks
 from scipy.special import logsumexp
 from sklearn.metrics import roc_auc_score
 from pathlib import Path
@@ -31,12 +34,14 @@ DEVICE = "cuda"
 DATASET = AV1M("val")
 
 FEATURES_DIR = {
+    "av-hubert-v": Path("/data/av-deepfake-1m/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features"),
     "clip": Path("/data/av1m-test/other/CLIP_features/test"),
     "fsfm": Path("/data/audio-video-deepfake-3/FSFM_face_features/test_face_fix"),
     "videomae": Path("/data/audio-video-deepfake-2/Video_MAE_large/test"),
 }
 
 SUBSAMPLING_FACTORS = {
+    "av-hubert-v": 1,
     "clip": 1,
     "fsfm": 1,
     "videomae": 2,
@@ -132,6 +137,7 @@ def get_per_frame_labels_default(datum):
     for s, e in datum["fake_segments"]:
         s = time_to_index(s)
         e = time_to_index(e)
+        e = e + 1
         labels[s:e] = 1
     return labels
 
@@ -150,12 +156,14 @@ def get_per_frame_labels_video_mae(datum):
     for s, e in datum["fake_segments"]:
         s = time_to_index(s, subsampling_factor)
         e = time_to_index(e, subsampling_factor)
+        e = e + 1
         labels[s:e] = 1
 
     return labels
 
 
 GET_PER_FRAME_LABELS = {
+    "av-hubert-v": get_per_frame_labels_default,
     "clip": get_per_frame_labels_default,
     "fsfm": get_per_frame_labels_default,
     "videomae": get_per_frame_labels_video_mae,
@@ -221,7 +229,8 @@ def get_predictions_path(feature_extractor_type):
     return "output/{}-linear/predictions.npy".format(feature_extractor_type.lower())
 
 
-def get_prediction_figure(preds, datum, feature_extractor_type="CLIP"):
+def get_prediction_figure(datum, feature_extractor_type="CLIP"):
+    preds = datum["frame-preds"]
     subsampling_factor = SUBSAMPLING_FACTORS[feature_extractor_type]
 
     def show_fake_segment(ax, fake_segment):
@@ -229,16 +238,23 @@ def get_prediction_figure(preds, datum, feature_extractor_type="CLIP"):
         e = fake_segment[1]
         ax.axvspan(s, e, color="red", alpha=0.3)
 
-    fig, axs = plt.subplots(figsize=(10, 6), nrows=2, sharex=True)
+    sns.set(style="white", font="Arial", context="poster")
+
+    fig = plt.figure(figsize=(8, 4))
+    gs = fig.add_gridspec(2, 1, hspace=0)
+    axs = gs.subplots(sharex="col")
+    # fig, axs = plt.subplots(figsize=(8, 5), nrows=2, sharex=True)
+    # plt.subplots_adjust(hspace=0.0)
     probas = pred_to_proba(preds)
     indices = np.arange(len(preds))
     times = index_to_time(indices, subsampling_factor)
 
     axs[0].plot(times, preds)
-    axs[0].set_ylabel("logit")
+    axs[0].set_ylabel("score")
+    axs[0].set_ylim(-7.5, 7.5)
 
     axs[1].plot(times, probas)
-    axs[1].set_ylim(0, 1)
+    axs[1].set_ylim(0, 1.1)
     axs[1].set_ylabel("proba")
     axs[1].set_xlabel("time")
 
@@ -246,12 +262,34 @@ def get_prediction_figure(preds, datum, feature_extractor_type="CLIP"):
         for ax in axs:
             show_fake_segment(ax, fake_segment)
 
+    axs[0].axhline(0.0, linestyle="--", color="gray")
+    axs[1].axhline(0.5, linestyle="--", color="gray")
+
+    MARKERS = {
+        "idx-l": "v",
+        "idx-c": "v",
+        "idx-r": "v",
+    }
+
+    for idxs in datum["frames-to-show"]:
+        for k, idx in idxs.items():
+            if not (0 <= idx < len(preds)):
+                continue
+            axs[1].plot(
+                times[idx],
+                # probas[idx],
+                1.05,
+                MARKERS[k],
+                color="black",
+            )
+
+    # fig.tight_layout()
     return fig
 
 
-def show1(preds, datum, feature_extractor_type):
+def show1(datum, feature_extractor_type):
     video_path = DATASET.get_video_path(datum["file"])
-    fig = get_prediction_figure(preds, datum, feature_extractor_type)
+    fig = get_prediction_figure(datum, feature_extractor_type)
     label = get_label(datum)
     label_str = "fake" if label == 1 else "real"
     video_score_str = (
@@ -272,47 +310,123 @@ def show1(preds, datum, feature_extractor_type):
     st.pyplot(fig)
 
 
-def show_frames(preds, datum, feature_extractor_type):
+def get_frame_info(datum, i, subsampling_factor):
+    pred = datum["frame-preds"][i]
+    proba = datum["frame-probas"][i]
+    label = datum["frame-labels"][i]
+    label_str = "fake" if label == 1 else "real"
+    t = index_to_time(i, subsampling_factor)
+    return ul(
+        [
+            "frame: {:d} · time: {:.1f}s".format(i, t),
+            "label: {}".format(label_str),
+            "proba: {:.2f} · pred: {:.1f}".format(proba, pred),
+        ]
+    )
+
+
+def show_frames(datum, feature_extractor_type):
     frames = list(load_video_frames_datum(datum))
-    probas = pred_to_proba(preds)
+    ssf = SUBSAMPLING_FACTORS[feature_extractor_type]
 
-    get_per_frame_labels = GET_PER_FRAME_LABELS[feature_extractor_type]
-    labels = get_per_frame_labels(datum)
+    def undo_ss(f):
+        return f * ssf
 
+    for idxs in datum["frames-to-show"]:
+        cols = st.columns(3)
+
+        for col, i in zip(cols, idxs.values()):
+            # - i is the index in the predictions
+            # - f is the index in the frames
+            f = undo_ss(i)
+
+            if not (0 <= f < len(frames)):
+                continue
+
+            col.markdown(get_frame_info(datum, i, ssf))
+            col.image(frames[f])
+
+
+def get_frames_to_show_fake_segments(datum, feature_extractor_type):
     subsampling_factor = SUBSAMPLING_FACTORS[feature_extractor_type]
 
-    def get_info(i):
-        label = labels[i]
-        label_str = "fake" if label == 1 else "real"
-        return ul(
-            [
-                "frame: {:d} · time: {:.1f}s".format(i, index_to_time(i)),
-                "label: {}".format(label_str),
-                "proba: {:.2f}".format(probas[i]),
-            ]
-        )
-
-    for s, e in datum["fake_segments"]:
+    def do1(s, e):
         idx_s = time_to_index(s, subsampling_factor)
         idx_e = time_to_index(e, subsampling_factor)
 
-        segment_scores = probas[idx_s:idx_e]
-        idx_1 = np.argmax(segment_scores) + idx_s
+        segment_scores = datum["frame-probas"][idx_s:idx_e]
+        try:
+            idx_c = np.argmax(segment_scores) + idx_s
+        except ValueError:
+            return None
 
         # Find thw two adjacent frames to the fake segment.
-        idx_0 = idx_s - 1 if idx_s > 0 else None
-        idx_2 = idx_e if idx_e < len(frames) else None
+        idx_l = idx_s - 1
+        idx_r = idx_e + 1
+        return {
+            "idx-l": idx_l,
+            "idx-c": idx_c,
+            "idx-r": idx_r,
+        }
 
-        idxs = [idx_0, idx_1, idx_2]
-        cols = st.columns(3)
+    results = [do1(s, e) for s, e in datum["fake_segments"]]
+    results = [r for r in results if r is not None]
+    return results
 
-        for i in range(3):
-            idx = idxs[i]
-            if idx is None:
-                continue
 
-            cols[i].markdown(get_info(idx))
-            cols[i].image(frames[idx])
+def get_frames_to_show_peaks(datum, *args, **kwargs):
+    peaks, peaks_info = find_peaks(datum["frame-probas"], height=0.999, prominence=0.7)
+    return [
+        {
+            "idx-l": peaks_info["left_bases"][i],
+            "idx-c": peaks[i],
+            "idx-r": peaks_info["right_bases"][i],
+        }
+        for i in range(len(peaks))
+    ]
+
+
+GET_FRAMES_TO_SHOW = {
+    "fake segments": get_frames_to_show_fake_segments,
+    "peaks": get_frames_to_show_peaks,
+}
+
+
+@st.cache_data
+def load_data(feature_extractor_type):
+    model_classifier = load_model_classifier(feature_extractor_type)
+
+    metadata0 = load_test_metadata(feature_extractor_type)
+    features0 = load_test_features(feature_extractor_type)
+
+    path = get_predictions_path(feature_extractor_type)
+    preds = cache_np(path, compute_predictions, model_classifier, features0)
+
+    preds, metadata = select_rvra_or_fvfa(preds, metadata0)
+    preds_video = [aggregate_preds(p) for p in preds]
+
+    # feats, _ = select_rvra_or_fvfa(features0, metadata0)
+
+    scores_video = eval_per_video(
+        preds,
+        metadata,
+        feature_extractor_type=feature_extractor_type,
+        to_binarize=False,
+    )
+
+    data = [
+        {
+            "frame-preds": preds[i],
+            "frame-probas": pred_to_proba(preds[i]),
+            "frame-labels": GET_PER_FRAME_LABELS[feature_extractor_type](metadata[i]),
+            "video-pred": preds_video[i],
+            "video-score": scores_video[i],
+            **metadata[i],
+        }
+        for i in range(len(preds))
+    ]
+
+    return data
 
 
 if __name__ == "__main__":
@@ -335,8 +449,8 @@ if __name__ == "__main__":
     with st.sidebar:
         feature_extractor_type = st.selectbox(
             "Feature Extractor",
-            options=["clip", "fsfm", "videomae"],
-            index=2,
+            options=FEATURES_DIR.keys(),
+            index=0,
         )
         sorter = st.selectbox(
             "Sort by",
@@ -348,53 +462,41 @@ if __name__ == "__main__":
             min_value=1,
             value=16,
         )
+        frames_to_show_type = st.selectbox(
+            "Frames to show",
+            options=["fake segments", "peaks"],
+            index=0,
+        )
 
-    model_classifier = load_model_classifier(feature_extractor_type)
+    data = load_data(feature_extractor_type)
+    num_videos = len(data)
 
-    metadata0 = load_test_metadata(feature_extractor_type)
-    features0 = load_test_features(feature_extractor_type)
+    get_frames_to_show_fake_segments = GET_FRAMES_TO_SHOW[frames_to_show_type]
 
-    path = get_predictions_path(feature_extractor_type)
-    preds = cache_np(path, compute_predictions, model_classifier, features0)
+    for datum in data:
+        datum["frames-to-show"] = get_frames_to_show_fake_segments(
+            datum, feature_extractor_type
+        )
 
-    preds, metadata = select_rvra_or_fvfa(preds, metadata0)
-    preds_video = [aggregate_preds(p) for p in preds]
+    preds_video = [datum["video-pred"] for datum in data]
+    auc_clf = eval_video_level(preds_video, data)
+    auc_loc_no_none = [
+        datum["video-score"] for datum in data if datum["video-score"] is not None
+    ]
 
-    auc = eval_video_level(preds_video, metadata)
-    # feats, _ = select_rvra_or_fvfa(features0, metadata0)
-
-    scores_video = eval_per_video(
-        preds,
-        metadata,
-        feature_extractor_type=feature_extractor_type,
-        to_binarize=False,
-    )
-    scores_video_no_none = [s for s in scores_video if s is not None]
-
-    num_videos = len(preds)
     st.markdown(
         ul(
             [
                 "num. of selected videos: {}".format(num_videos),
-                "Classification: {:.2f}% AUC".format(100 * auc),
+                "Classification: {:.2f}% AUC".format(100 * auc_clf),
                 "Localization: {:.2f}% AUC (over {} videos)".format(
-                    100 * np.mean(scores_video_no_none),
-                    len(scores_video_no_none),
+                    100 * np.mean(auc_loc_no_none),
+                    len(auc_loc_no_none),
                 ),
             ]
         )
     )
     st.markdown("---")
-
-    data = [
-        {
-            "frame-preds": preds[i],
-            "video-pred": preds_video[i],
-            "video-score": scores_video[i],
-            **metadata[i],
-        }
-        for i in range(num_videos)
-    ]
 
     if str(sorter).startswith("video-score"):
         data = [datum for datum in data if datum["video-score"] is not None]
@@ -410,15 +512,7 @@ if __name__ == "__main__":
             with col:
                 col1, col2 = st.columns([1, 3])
                 with col1:
-                    show1(
-                        datum["frame-preds"],
-                        datum,
-                        feature_extractor_type,
-                    )
+                    show1(datum, feature_extractor_type)
                 with col2:
-                    show_frames(
-                        datum["frame-preds"],
-                        datum,
-                        feature_extractor_type,
-                    )
+                    show_frames(datum, feature_extractor_type)
                 st.markdown("---")
