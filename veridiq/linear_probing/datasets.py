@@ -453,8 +453,12 @@ class PerFileDataset(Dataset):
                     video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "multimodal":
-            video = feats["multimodal"]
-            audio = feats["multimodal"]
+            try:
+                video = feats["multimodal"]
+                audio = feats["multimodal"]
+            except:
+                video = feats
+                audio = feats
         else:
             raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
 
