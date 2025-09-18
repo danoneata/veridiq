@@ -453,8 +453,12 @@ class PerFileDataset(Dataset):
                     video = feats
             audio = -np.ones((video.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "multimodal":
-            video = feats["multimodal"]
-            audio = feats["multimodal"]
+            try:
+                video = feats["multimodal"]
+                audio = feats["multimodal"]
+            except:
+                video = feats
+                audio = feats
         else:
             raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
 
@@ -463,6 +467,261 @@ class PerFileDataset(Dataset):
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
 
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
+
+
+class EarlyFusion(Dataset):
+    def __init__(self, config, split="train"):
+        self.config = config
+        self.split = split
+
+        self.datasets = self.config["datasets"]
+        self.order = self.config["order"]
+        self.csv_root_path = self.config["csv_root_path"]
+
+        if "dname" in self.config.keys() and self.config["dname"] == "DFEval":
+            if split != "test":
+                raise ValueError("For now, DFEval works only for testing!")
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
+            self.df["path"] = self.df["full_file_path"]
+            self.df = self.df[self.df["label"] != "unknown"]
+            self.df = self.df[self.df["dataset"] == "Deepfake-Eval-2024"]
+            self.df = self.df[self.df["original_split"] == "test"]
+            self.df["label"] = self.df["label"].map({"real": 0, "fake": 1})
+            self.feats_dir = { key: self.datasets[key]['root_path'] for key in self.datasets.keys() }
+        else:
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
+            self.feats_dir = { key: os.path.join(self.datasets[key]['root_path'], self.split) for key in self.datasets.keys() }
+
+        if "fvfa_rvra_only" in config and config["fvfa_rvra_only"]:
+            if "dname" in self.config.keys() and self.config["dname"] == "DFEval":
+                with open(self.config["files_to_remove"], "r") as f:
+                    files_to_remove = f.readlines()
+                    files_to_remove = [v.replace("\n", "").replace("/feats/", "/videos/") for v in files_to_remove]
+                    self.df = self.df[~self.df['path'].isin(files_to_remove)]
+            else:
+                with open(config["metadata_path"], "r") as f:
+                    metadata = json.load(f)
+
+                remove_paths = []
+                set_paths = set(self.df['path'].to_list())
+                for md in metadata:
+                    if md["file"] in set_paths:
+                        if (len(md['audio_fake_segments']) > 0 and len(md['visual_fake_segments']) > 0) or len(md['fake_segments']) == 0:
+                            continue
+                        else:
+                            remove_paths.append(md["file"])
+
+                remove_paths = set(remove_paths)
+                remove_indices = []
+                for idx in self.df.index:
+                    if self.df.iloc[idx]['path'] in remove_paths:
+                        remove_indices.append(idx)
+
+                self.df.drop(remove_indices, inplace=True)
+
+    def __len__(self):
+        return len(self.df.index)
+
+    def subsample_vector_to_match_videomae(self, vector, total_video_frames, chunk_size=16, num_segments=8):
+        # Reshape to (num_chunks, chunk_size, audio_dim)
+        num_chunks = total_video_frames // chunk_size
+        vector = vector[:num_chunks * chunk_size]  # trim extra frames if needed
+
+        chunks = vector.reshape(num_chunks, chunk_size, -1)
+
+        # Get evenly spaced indices
+        idx = np.linspace(0, chunk_size - 1, num_segments).astype(int)
+
+        # Subsample and return (num_chunks * num_segments, audio_dim)
+        return chunks[:, idx].reshape(-1, chunks.shape[-1])
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+
+        feats = {}
+        for key, value in self.feats_dir.items():
+            try:
+                feat = np.load(os.path.join(value, row["path"][:-4] + ".npz"), allow_pickle=True)
+            except FileNotFoundError:
+                try:
+                    feat = np.load(os.path.join(value, row["path"][:-4] + ".npy"), allow_pickle=True)
+                except FileNotFoundError:
+                    feat = np.load(os.path.join(value, row["path"][:-4] + ".npz.npy"), allow_pickle=True)
+            except:
+                print(os.path.join(value, row["path"][:-4] + ".npz"))
+            if self.datasets[key]['suffix'] is not None:
+                feat = feat[self.datasets[key]['suffix']]
+            feats[key] = feat
+
+        label = int(row["label"])
+
+        if self.config["input_type"] == "both":
+            feats0 = feats[self.order[0]]
+            feats1 = feats[self.order[1]]
+
+            if len(feats0.shape) > 2:
+                feats0 = feats0.reshape(-1, feats0.shape[-1])
+                if self.order[0] == "videomae":  # subsample feats1 to match feats0
+                    feats1 = self.subsample_vector_to_match_videomae(feats1, min(feats1.shape[0], feats0.shape[0] * 2))
+            if len(feats1.shape) > 2:
+                feats1 = feats1.reshape(-1, feats1.shape[-1])
+                if self.order[0] == "videomae":  # subsample feats0 to match feats1
+                    feats0 = self.subsample_vector_to_match_videomae(feats0, min(feats0.shape[0], feats1.shape[0] * 2))
+
+            residual = feats0.shape[0] - feats1.shape[0]
+            if residual > 0:
+                feats0 = feats0[:-residual]
+            elif residual < 0:
+                feats1 = feats1[:residual]
+        else:
+            raise ValueError(f"input_type should be \'both\' only! Got: " + self.config["input_type"])
+
+        if "apply_l2" in self.config and self.config["apply_l2"]:
+            feats0 = feats0 / (np.linalg.norm(feats0, ord=2, axis=-1, keepdims=True))
+            feats1 = feats1 / (np.linalg.norm(feats1, ord=2, axis=-1, keepdims=True))
+
+        return torch.tensor(feats0, dtype=torch.float32), torch.tensor(feats1, dtype=torch.float32), label, row["path"][:-4] + ".npz"
+
+
+class EarlyFusionTest(Dataset):
+    def __init__(self, config):
+        self.config = config
+        self.datasets = self.config["datasets"]
+        self.order = self.config["order"]
+        self.csv_root_path = self.config["csv_root_path"]
+        self.trimmed = config["trimmed"]
+
+        self.paths = {}
+        self.feats = {}
+        for key, dataset in self.datasets.items():
+            self.paths[key] = np.load(os.path.join(dataset['root_path'], "paths.npy"), allow_pickle=True)
+            self.feats[key] = np.load(os.path.join(dataset['root_path'], dataset["filename"] + ".npy"), allow_pickle=True)
+            if key == "videomae":
+                new_paths = []
+                for path in self.paths[key]:
+                    path_cleaned = path.replace(" (", "_").replace(")", "")
+                    new_paths.append(path_cleaned)
+                self.paths[key] = np.array(new_paths)
+
+        self.labels = self._get_labels()
+
+    def _get_labels(self):
+        if "dname" not in self.config.keys() or self.config["dname"] == 'AV1M': 
+            df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv"))
+        elif self.config["dname"] == "FAVC":
+            df = pd.read_csv(os.path.join(self.csv_root_path, "test_split.csv"))
+            df['path'] = df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
+            df = df[~df['path'].isin(INVALID_VIDS)]
+            df['label'] = df['category'].map({'A': 0, 'B': 1, 'C': 1, 'D': 1})
+        else:
+            raise ValueError("Wrong dname!")
+
+        if "fvfa_rvra_only" in self.config and self.config["fvfa_rvra_only"]:
+            if "dname" not in self.config.keys() or self.config["dname"] == 'AV1M':
+                with open(self.config["metadata_path"], "r") as f:
+                    metadata = json.load(f)
+
+                remove_paths = []
+                set_paths = set(df['path'].to_list())
+                for md in metadata:
+                    if md["file"] in set_paths:
+                        if (len(md['audio_fake_segments']) > 0 and len(md['visual_fake_segments']) > 0) or len(md['fake_segments']) == 0:
+                            continue
+                        else:
+                            remove_paths.append(md["file"])
+            elif self.config["dname"] == "FAVC":
+                remove_paths = df[~df['category'].isin(['A', 'D'])]['path'].to_list()
+                considered_paths = set(df['path'].to_list())
+                for _, path in enumerate(self.paths[self.order[0]]):
+                    if path not in considered_paths:
+                        remove_paths.append(path)
+                for _, path in enumerate(self.paths[self.order[1]]):
+                    if path not in considered_paths:
+                        remove_paths.append(path)
+
+            remove_paths = set(remove_paths)
+            for key in self.datasets.keys():
+                remove_indices = []
+                for idx, path in enumerate(self.paths[key]):
+                    if path in remove_paths:
+                        remove_indices.append(idx)
+
+                self.paths[key] = np.delete(self.paths[key], remove_indices)
+                self.feats[key] = np.delete(self.feats[key], remove_indices)
+
+            remove_indices = []
+            for idx in df.index:
+                if df.loc[idx]['path'] in remove_paths:
+                    remove_indices.append(idx)
+
+            df.drop(remove_indices, inplace=True)
+
+        assert np.array_equal(np.sort(self.paths[self.order[0]]), np.sort(self.paths[self.order[1]]))
+
+        labels = {}
+        for path in self.paths[self.order[0]]:
+            row = df.loc[df['path'] == path]
+            if len(row.index) != 1:
+                print(path)
+                raise ValueError("Multiple or no entries in test_labels.csv for a single path!")
+            row = row.iloc[0]
+            labels[path] = int(row['label'])
+
+        return labels
+
+    def __len__(self):
+        return len(self.paths[self.order[0]])
+
+    def subsample_vector_to_match_videomae(self, vector, total_video_frames, chunk_size=16, num_segments=8):
+        # Reshape to (num_chunks, chunk_size, audio_dim)
+        num_chunks = total_video_frames // chunk_size
+        vector = vector[:num_chunks * chunk_size]  # trim extra frames if needed
+
+        chunks = vector.reshape(num_chunks, chunk_size, -1)
+
+        # Get evenly spaced indices
+        idx = np.linspace(0, chunk_size - 1, num_segments).astype(int)
+
+        # Subsample and return (num_chunks * num_segments, audio_dim)
+        return chunks[:, idx].reshape(-1, chunks.shape[-1])
+
+    def __getitem__(self, idx):
+        path = self.paths[self.order[0]][idx]
+        feats0 = self.feats[self.order[0]][idx]
+
+        index1 = np.where(self.paths[self.order[1]] == path)[0]
+        if len(index1) != 1:
+            raise ValueError(f"Multiple or no values for path (audio): {path}")
+        index1 = index1[0]
+        feats1 = self.feats[self.order[1]][index1]
+        assert self.paths[self.order[1]][index1] == path
+
+        if len(feats0.shape) > 2:
+            feats0 = feats0.reshape(-1, feats0.shape[-1])
+            if self.order[0] == "videomae":  # subsample feats1 to match feats0
+                feats1 = self.subsample_vector_to_match_videomae(feats1, min(feats1.shape[0], feats0.shape[0] * 2))
+        if len(feats1.shape) > 2:
+            feats1 = feats1.reshape(-1, feats1.shape[-1])
+            if self.order[0] == "videomae":  # subsample feats0 to match feats1
+                feats0 = self.subsample_vector_to_match_videomae(feats0, min(feats0.shape[0], feats1.shape[0] * 2))
+
+        residual = feats0.shape[0] - feats1.shape[0]
+        if residual > 0:
+            feats0 = feats0[:-residual]
+        elif residual < 0:
+            feats1 = feats1[:residual]
+
+        if "apply_l2" in self.config and self.config["apply_l2"]:
+            feats0 = feats0 / (np.linalg.norm(feats0, ord=2, axis=-1, keepdims=True))
+            feats1 = feats1 / (np.linalg.norm(feats1, ord=2, axis=-1, keepdims=True))
+
+        label = self.labels[path]
+
+        if self.trimmed:
+            feats0 = feats0[1:]
+            feats1 = feats1[1:]
+
+        return torch.tensor(feats0, dtype=torch.float32), torch.tensor(feats1, dtype=torch.float32), label, path  # video, audio, label, path
 
 
 class DanDataset(Dataset):
@@ -504,6 +763,11 @@ def load_data(config, test=False):
         elif config["dataset_name"] == "DanDataset":
             config_rest = dissoc(config, "dataset_name")
             test_ds = DanDataset(split="test", **config_rest)
+        elif config["dataset_name"] == "early_fusion":
+            if "dname" in config.keys() and config["dname"] == "DFEval":
+                test_ds = EarlyFusion(config, split="test")
+            else:
+                test_ds = EarlyFusionTest(config)
         else:
             test_ds = AV1M_test_dataset(config)
         test_dl = DataLoader(test_ds, shuffle=False, batch_size=1)
@@ -518,6 +782,9 @@ def load_data(config, test=False):
             config_rest = dissoc(config, "dataset_name")
             train_ds = DanDataset(split="train", **config_rest)
             val_ds = DanDataset(split="val", **config_rest)
+        elif config["dataset_name"] == "early_fusion":
+            train_ds = EarlyFusion(config, split="train")
+            val_ds = EarlyFusion(config, split="val")
         else:
             train_ds = AV1M_trainval_dataset(config, split="train")
             val_ds = AV1M_trainval_dataset(config, split="val")
