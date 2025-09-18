@@ -99,9 +99,8 @@ if __name__ == "__main__":
             if args.test:
                 paths.append(row['path'])
                 videos.append(video_feats)
-            else:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                np.save(dst, video_feats)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            np.save(dst, video_feats)
 
     if args.test:
         os.makedirs(args.out_root_path, exist_ok=True)

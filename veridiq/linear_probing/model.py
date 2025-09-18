@@ -12,10 +12,7 @@ class LinearModel(L.LightningModule):
 
         self.save_hyperparameters()
 
-        if self.input_type == "both":
-            self.head = nn.Linear(2 * self.feats_dim, 1)
-        else:
-            self.head = nn.Linear(self.feats_dim, 1)
+        self.head = nn.Linear(self.feats_dim, 1)
 
     def forward(self, input_feats, per_frame=False):
         video_feats, audio_feats = input_feats[0], input_feats[1]

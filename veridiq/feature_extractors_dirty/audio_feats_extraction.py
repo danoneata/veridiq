@@ -238,9 +238,8 @@ if __name__ == "__main__":
             if args.test:
                 paths.append(row['path'])
                 audios.append(audio_feats)
-            else:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                np.save(dst, audio_feats)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            np.save(dst, audio_feats)
 
     if args.test:
         os.makedirs(args.out_root_path, exist_ok=True)

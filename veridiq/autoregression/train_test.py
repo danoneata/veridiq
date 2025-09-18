@@ -106,6 +106,44 @@ def test(config):
         f.write(f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n")
 
 
+def test_loss(config):
+    test_dl = load_data(config=config["data_info"], test=True)
+    model = AutoregressorHead.load_from_checkpoint(config["ckpt_path"])
+
+    model.to("cuda")
+    model.eval()
+
+    real_loss = np.array([])
+    fake_loss = np.array([])
+    with torch.no_grad():
+        for batch in tqdm.tqdm(test_dl):
+            feats, masks, labels, paths = batch
+            feats, masks = feats.to("cuda"), masks.to("cuda")
+
+            masks = masks[:, 1:]
+            output = model.forward(feats[:, :-1, :], masks)
+            loss = torch.nn.functional.mse_loss(output, feats[:, 1:, :], reduction='none')
+            loss = (loss * masks.unsqueeze(2).float()).sum()
+            non_zero_elements = (masks.sum() * feats.shape[2])
+            loss = loss / non_zero_elements
+
+            if labels.item() == 0:
+                real_loss = np.concatenate((real_loss, loss.unsqueeze(0).cpu().numpy()), axis=0)
+            elif labels.item() == 1:
+                fake_loss = np.concatenate((fake_loss, loss.unsqueeze(0).cpu().numpy()), axis=0)
+
+    os.makedirs(config["output_path"], exist_ok=True)
+
+    with open(os.path.join(config["output_path"], "tested_config.yaml"), "w") as f:
+        yaml.safe_dump(config, f)
+
+    with open(os.path.join(config["output_path"], "test_loss.txt"), "w") as f:
+        f.write(f"No. reals: {real_loss.shape}")
+        f.write(f"No. fakes: {fake_loss.shape}")
+        f.write(f"Real loss: {real_loss.mean()}\n")
+        f.write(f"Fake loss: {fake_loss.mean()}\n")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Training and testing loop'
@@ -113,6 +151,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--config_path')
     parser.add_argument('--test', action='store_true')
+    parser.add_argument('--loss', action='store_true')
     args = parser.parse_args()
 
     with open(args.config_path, "r") as f:
@@ -121,5 +160,7 @@ if __name__ == "__main__":
     set_seed(config["seed"])
     if args.test:
         test(config=config)
+    elif args.loss:
+        test_loss(config=config)
     else:
         train(config=config)
