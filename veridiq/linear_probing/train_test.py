@@ -14,11 +14,11 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-# from veridiq.linear_probing.datasets import load_data
-# from veridiq.linear_probing.model import LinearModel
+from veridiq.linear_probing.datasets import load_data
+from veridiq.linear_probing.model import LinearModel
 
-from datasets import load_data
-from model import LinearModel
+# from datasets import load_data
+# from model import LinearModel
 
 def init_callbacks(config):
     # LOGGER
