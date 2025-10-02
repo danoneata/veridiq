@@ -10,6 +10,7 @@ import h5py
 import torch
 
 from huggingface_hub import hf_hub_download
+import soundfile as sf
 from toolz import partition_all
 from torch import nn
 from torchvision import transforms
@@ -19,12 +20,16 @@ from transformers import (
     CLIPProcessor,
     VideoMAEImageProcessor,
     VideoMAEModel,
+    AutoFeatureExtractor,
+    WavLMModel,
+    Wav2Vec2Model
 )
-
 import veridiq.fsfm.models_vit
 
 from veridiq.data import DATASETS
 from veridiq.utils import implies
+
+SAMPLING_RATE = 16_000
 
 
 DEVICE = "cuda"
@@ -184,6 +189,34 @@ class VideoMAE(FeatureExtractor):
     def get_features(self, x):
         return self.model.forward_features(x)
 
+class Wav2VecFeatureExtractor(FeatureExtractor):
+    def __init__(self, model_class, model_name):
+        super().__init__()
+        self.device = DEVICE
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+        self.model = model_class.from_pretrained(model_name)
+        self.model.to(self.device).eval()
+        self.feature_dim = self.model.config.hidden_size
+
+    def transform(self, audio):
+        inputs = self.feature_extractor(
+            audio,
+            sampling_rate=SAMPLING_RATE,
+            return_tensors="pt",
+        )
+        return {k: v.to(self.device) for k, v in inputs.items()}
+
+    def get_features(self, x):
+        with torch.no_grad():
+            outputs = self.model(**x)
+        # outputs.last_hidden_state: (batch, time, dim)
+        return outputs.last_hidden_state.squeeze(0)
+
+    def get_features_from_file(self, wav_path):
+        audio, sr = sf.read(wav_path)
+        assert sr == SAMPLING_RATE, f"Expected {SAMPLING_RATE}, got {sr}"
+        inputs = self.transform(audio)
+        return self.get_features(inputs)
 
 class PerFrameFeatureExtractor:
     def __init__(self, get_model):
@@ -213,6 +246,7 @@ FEATURE_EXTRACTORS = {
     ),
     "fsfm": partial(PerFrameFeatureExtractor, FSFM),
     "video-mae": VideoMAE,
+    "wav2vec2": partial(Wav2VecFeatureExtractor, Wav2Vec2Model, "facebook/wav2vec2-xls-r-2b"),
 }
 
 

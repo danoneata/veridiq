@@ -28,7 +28,7 @@ class AVSRDataLoader:
             self.video_transform = VideoTransform(speed_rate=speed_rate)
 
 
-    def load_data(self, data_filename, audio_filename, landmarks=None, transform=True):
+    def load_data(self, data_filename, landmarks=None, transform=True):
         if self.modality == "audio":
             audio, sample_rate = self.load_audio(data_filename)
             audio = self.audio_process(audio, sample_rate)
@@ -40,9 +40,13 @@ class AVSRDataLoader:
             return self.video_transform(video) if self.transform else video
         if self.modality == "audiovisual":
             rate_ratio = 640
-            audio, sample_rate = self.load_audio(audio_filename)
+            if type(data_filename) is list:
+                audio, sample_rate = self.load_audio(data_filename[0])
+                video = self.load_video(data_filename[1])
+            else:
+                audio, sample_rate = self.load_audio(data_filename)
+                video = self.load_video(data_filename)
             audio = self.audio_process(audio, sample_rate)
-            video = self.load_video(data_filename)
             video = self.video_process(video, landmarks)
             video = torch.tensor(video)
             min_t = min(len(video), audio.size(1) // rate_ratio)

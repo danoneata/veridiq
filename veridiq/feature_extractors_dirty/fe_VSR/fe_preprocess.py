@@ -22,8 +22,7 @@ def preprocess_video(src_filename, dst_filename):
     data = dataloader.load_data(src_filename, landmarks)
     
     fps_raw = cv2.VideoCapture(src_filename).get(cv2.CAP_PROP_FPS)
-    fps = float(fps_raw) if fps_raw is not None else 25.0  # Default fallback
-    # print("FPS:", fps, "Type:", type(fps))  # Debugging
+    fps = float(fps_raw) if fps_raw is not None else 25.0 
     
     save2vid(dst_filename, data, fps)
 
@@ -70,34 +69,37 @@ if __name__ == "__main__":
     SPLIT = "train"
     print("Split: ", SPLIT)
     None_counter = 0
+    dataset == "AVLips"
 
     modality = "video"
-    # AV1M
-    # features_root_path = "/data/av-deepfake-1m/av_deepfake_1m/train/"
-    # save_path = f"/data/audio-video-deepfake-3/ASR/preprocessed_audio/real/{SPLIT}/"
-    # csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv")
     
-    # FAVC
-    # features_root_path = "/data/av-datasets/datasets/FakeAVCeleb/"
-    # save_path = f"/data/av-extracted-features/favc_auto_avsr_preprocessed/"
-    # csv1_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/train_split.csv")
-    # csv2_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/val_split.csv")
-    # csv3_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/test_split.csv")
-
-    # BitDF
-    # features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
-    # save_path = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
-    # csv1_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
-
-    # AVLips
-    features_root_path = "/data/avlips/AVLips/"
-    save_path = f"/data/av-extracted-features/avlips_auto_avsr_preprocessed/"
-    csv1_paths = load_csv_paths("/data/avlips/AVLips/test_labels.csv")
-
-    # csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/av_deepfake_1m/{SPLIT}_labels.csv")
-    # csv2_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv')
-    
-    files = sorted(set(csv1_paths)) #.union(csv2_paths, csv3_paths))
+    if dataset == "AV1M":
+        # AV1M
+        features_root_path = "/data/av-deepfake-1m/av_deepfake_1m/train/"
+        save_path = f"/data/audio-video-deepfake-3/ASR/preprocessed_audio/real/{SPLIT}/"
+        csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv")
+    elif dataset == "FAVC":
+        # FAVC
+        features_root_path = "/data/av-datasets/datasets/FakeAVCeleb/"
+        save_path = f"/data/av-extracted-features/favc_auto_avsr_preprocessed/"
+        csv_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/train_split.csv")
+        # csv2_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/val_split.csv")
+        # csv3_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/test_split.csv")
+    elif dataset == "BitDF":
+        # BitDF
+        features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks/"
+        save_path = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
+        csv_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    elif dataset == "AVLips":
+        # AVLips
+        features_root_path = "/data/avlips/AVLips/"
+        save_path = f"/data/av-extracted-features/avlips_auto_avsr_preprocessed/"
+        csv_paths = load_csv_paths("/data/avlips/AVLips/test_labels.csv")
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset}. "
+                     f"Choose from ['AV1M', 'FAVC', 'BitDF', 'AVLips'].")
+        
+    files = sorted(set(csv_paths))
     print(f"Saving at {save_path}")
 
     start_index, end_index = get_machine_indices(machine_id, end_idx = len(files)+2, num_machines=1)
@@ -107,17 +109,19 @@ if __name__ == "__main__":
     dataloader = AVSRDataLoader(modality=modality, speed_rate=1, transform=False, detector="mediapipe", convert_gray=False)
 
     for i, file_path in enumerate(tqdm(files[start_index:end_index])):
-        # file_path = file_path.replace("FakeAVCeleb/", "")
-        # file_path = file_path.replace("/feats/", "/videos/")
+        if dataset == "FAVC":
+            file_path = file_path.replace("FakeAVCeleb/", "")
+        elif dataset == "AVLips"
+            file_path = file_path.replace("/feats/", "/videos/") 
         save_video_path = save_path + file_path
         
-        # file_path = replace_ethnicity(file_path)
-        
-        # if "socialmedia" not in file_path:
-        #     continue
-        # else:
-        #     features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
-
+        if dataset == "FAVC":
+            file_path = replace_ethnicity(file_path)
+        # elif dataset == "BitDF":
+            # if "socialmedia" not in file_path:
+            #     continue
+            # else:
+            #     features_root_path = "/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
 
         original_video_path = features_root_path + file_path
         if os.path.isfile(save_video_path):

@@ -41,18 +41,40 @@ class InferencePipeline(torch.nn.Module):
         transcript = self.model.infer(data)
         return transcript
 
-    def extract_features(self, data_filename, audio_filename, landmarks_filename=None, extract_resnet_feats=False):
-        assert os.path.isfile(data_filename), f"data_filename: {data_filename} does not exist."
+    def extract_features(self, data_filename, landmarks_filename=None, extract_resnet_feats=False):
+        if type(data_filename) is list:    
+            # 0 = audio; 1 = video
+            assert os.path.isfile(data_filename[0]), f"data_filename: {data_filename[0]} does not exist."
+            assert os.path.isfile(data_filename[1]), f"data_filename: {data_filename[1]} does not exist."
+        else:
+            assert os.path.isfile(data_filename), f"data_filename: {data_filename} does not exist."
+        
         try:
-            landmarks = self.process_landmarks(data_filename, landmarks_filename)
+            if type(data_filename) is list: 
+                landmarks = self.process_landmarks(data_filename[1], landmarks_filename)
+            else:
+                landmarks = self.process_landmarks(data_filename, landmarks_filename)
+
         except Exception as e:
             print(e, " passing landmarks as None")
             landmarks = None
-        data = self.dataloader.load_data(data_filename, audio_filename, landmarks)
+        data = self.dataloader.load_data(data_filename, landmarks)
         
         with torch.no_grad():
             if isinstance(data, tuple):
-                enc_feats = self.model.model.encode(data[0].to(self.device), data[1].to(self.device), extract_resnet_feats)
+                enc_feats = self.model.model.encode(data[0].to(self.device), data[1].to(self.device), extract_resnet_feats
+
+                # in case of OOM, inference by chunks
+                # n = data[0].size(1)  # number of frames (time dimension)
+                # chunks = []
+                # for i in range(100):
+                #     start = i * n // 100
+                #     end = (i + 1) * n // 100
+                #     v_chunk = data[0][:, start:end].to(self.device)
+                #     a_chunk = data[1][start*640:end*640].to(self.device)  # adjust audio stride if needed
+                #     chunk = self.model.model.encode(v_chunk, a_chunk, extract_resnet_feats)
+                #     chunks.append(chunk.cpu())  # free GPU
+                # enc_feats = torch.cat(chunks, dim=0)
             else:
                 enc_feats = self.model.model.encode(data.to(self.device), extract_resnet_feats)
         
@@ -93,55 +115,65 @@ def get_machine_indices(machine_id, start_idx=0, end_idx=50000, num_machines=1):
     return start_index, end_index
 
 def main(split):
-    # machine_id = 4
-    # print(f"Machine id {machine_id}")
-    SPLIT = split #"train"
+    SPLIT = split
     print("Split: ", SPLIT)
     None_counter = 0
+    dataset = "AV1M"
 
     modality = "audiovisual"
     model_conf = "LRS3_AV_WER0.9/model.json"  
     model_path = "LRS3_AV_WER0.9/model.pth"
     pipeline = InferencePipeline(modality, model_path, model_conf, face_track=True)
 
-    path_to_features_root = f"/data/audio-video-deepfake-4/av-extracted-features-2/av1m_auto_avsr_multimodal/{SPLIT}/"
+    path_to_features_root = f"/data/av-extracted-features/{dataset}_auto_avsr/{modality}/"
     print(f"Saving at {path_to_features_root}")
-    if modality == "audio":
-        path_to_crops = "/data/avlips/AVLips/" # get audio (.wav)
-    else:
+
+    if dataset == "AV1M":
         path_to_crops = f"/data/audio-video-deepfake/ASR/preprocessed/real+fake/{SPLIT}"
-    
-    path_to_audios = f"/data/av-deepfake-1m/av_deepfake_1m/val/"
+        csv_paths = load_csv_paths(f"/data/av-deepfake-1m/av_deepfake_1m/{SPLIT}_labels.csv")
+        # csv_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv') # real-only data
+    elif dataset == "FAVC":
+        if modality == "audio":
+            path_to_crops = f"/data/av-datasets/datasets/FakeAVCeleb/" # get audio (.wav)
+        elif modality == "video":
+            path_to_crops = f"/data/av-extracted-features/favc_auto_avsr_preprocessed/"
+        elif modality == "audiovisual":
+            path_to_crops = (f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/",  f"/data/av-extracted-features/favc_auto_avsr_preprocessed/")
+        csv_paths = load_csv_paths(f"/data/av-datasets/datasets/FakeAVCeleb_preprocessed/all_splits/{SPLIT}_split.csv")
+    elif dataset == "BitDF":
+        if modality == "audio":
+            path_to_crops = f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/"
+        elif modality == "video":
+            path_to_crops = f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/"
+        elif modality == "audiovisual":
+            path_to_crops = (f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/", f"/data/av-extracted-features/bitdf_auto_avsr_preprocessed/")
+        csv_paths = load_csv_paths(f"/data/veridiq-shared-pg/dataset/filtered_tracks_processed/metadata.csv")
+    elif dataset == "AVLips":
+        path_to_crops = "/data/avlips/AVLips/"
+        csv_paths = load_csv_paths(f"/data/avlips/AVLips/test_labels.csv")
 
-    csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/av_deepfake_1m/{SPLIT}_labels.csv")
-    # csv2_paths = load_csv_paths(f'/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv')
-    files = sorted(list(csv1_paths))#.union(csv2_paths)))
-    print(len(files))
+    files = sorted(list(csv_paths))
 
-    # files = sorted([os.path.join(dp, f) for dp, dn, filenames in os.walk(VIDEOS_PATH) for f in filenames])
-    # print(len(files))
-    # start_index, end_index = get_machine_indices(machine_id, end_idx = len(files)+2, num_machines=5)
-    # print(start_index, end_index)
-
-    # AV1M
-    # features_root_path = "/data/av-deepfake-1m/av_deepfake_1m/train/"
-    # save_path = f"/data/audio-video-deepfake-3/ASR/preprocessed_audio/real/{SPLIT}/"
-    # csv1_paths = load_csv_paths(f"/data/av-deepfake-1m/real_data_features/45k+5k_split/real_{SPLIT}_data.csv")
-    
-
-    for i, file_path in enumerate(tqdm(files)): #[start_index:end_index])):
-        # file_path = file_path.replace("FakeAVCeleb/", "")
-        # file_path = file_path.replace("/feats/", "/videos/")
+    for i, file_path in enumerate(tqdm(files)):
+        if dataset == "FAVC":
+            file_path = file_path.replace("FakeAVCeleb/", "")
+        elif dataset == "AVLips": #sau BitDF
+            file_path = file_path.replace("/feats/", "/videos/")
         
         if modality == "audio":
             file_path = file_path.replace(".mp4", ".wav").replace("/videos/", "/processed/")
             mouth_roi_path = os.path.join(path_to_crops, file_path)
             save_path = os.path.join(path_to_features_root, file_path.replace(".wav", ".npz"))
-        else:
+        elif modality == "video":
             mouth_roi_path = os.path.join(path_to_crops, file_path)
             save_path = os.path.join(path_to_features_root, file_path.replace(".mp4", ".npz"))
-
-            audio_path = os.path.join(path_to_audios, file_path)
+        elif modality == "audiovisual":
+            mouth_roi_path = [None, None]
+            mouth_roi_path[1] = os.path.join(path_to_crops[1], file_path)
+            file_path = file_path.replace(".mp4", ".wav").replace("/videos/", "/processed/")
+            mouth_roi_path[0] = os.path.join(path_to_crops[0], file_path)
+            
+            save_path = os.path.join(path_to_features_root, file_path.replace(".mp4", ".npz"))
 
         if os.path.isfile(save_path):
             continue
@@ -157,7 +189,7 @@ def main(split):
             #     og_path = os.path.join(f"/data/veridiq-shared-pg/dataset/filtered_tracks/", file_path.replace("/processed/", "/videos/").replace(".wav", ".mp4"))
             #     ffmpeg.input(og_path).output(mouth_roi_path).run()
             #     print("used ffmpeg ", mouth_roi_path)
-            feature = pipeline.extract_features(mouth_roi_path, audio_path)
+            feature = pipeline.extract_features(mouth_roi_path)
             feature = feature.cpu().detach().numpy()
 
         except Exception as e:
@@ -173,7 +205,7 @@ def main(split):
 
 if __name__ == "__main__":
     # main(None)
-    # main("train")
-    # main("val")
+    main("train")
+    main("val")
     main("test")
     
