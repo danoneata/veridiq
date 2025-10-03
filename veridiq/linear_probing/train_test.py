@@ -20,6 +20,7 @@ from veridiq.linear_probing.model import LinearModel
 # from datasets import load_data
 # from model import LinearModel
 
+
 def init_callbacks(config):
     # LOGGER
     logger_path = config["logger"]["log_path"]
@@ -37,7 +38,7 @@ def init_callbacks(config):
             ModelCheckpoint(
                 monitor=config["ckpt_args"]["metric"],
                 dirpath=config["ckpt_args"]["ckpt_dir"],
-                filename='model-{epoch:02d}',
+                filename="model-{epoch:02d}",
                 mode=config["ckpt_args"]["mode"],
             )
         )
@@ -47,7 +48,7 @@ def init_callbacks(config):
             EarlyStopping(
                 monitor=config["early_stopping"]["metric"],
                 mode=config["early_stopping"]["mode"],
-                patience=config["early_stopping"]["patience"]
+                patience=config["early_stopping"]["patience"],
             )
         )
 
@@ -65,15 +66,20 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
+def get_checkpoint_path_from_folder(folder):
+    files = os.listdir(folder)
+    files = [f for f in files if f.endswith(".ckpt")]
+    assert len(files) == 1, "More than one checkpoint in the folder"
+    return os.path.join(folder, files[0])
+
+
 def get_checkpoint_path(config):
     """Allows to get the checkpoint path from a training config."""
     if "ckpt_path" in config:
         return config["ckpt_path"]
     elif "callbacks" in config:
         checkpoint_dir = config["callbacks"]["ckpt_args"]["ckpt_dir"]
-        files = os.listdir(checkpoint_dir)
-        assert len(files) == 1, "More than one checkpoint in the folder"
-        return os.path.join(checkpoint_dir, files[0])
+        return get_checkpoint_path_from_folder(checkpoint_dir)
     else:
         raise ValueError("No checkpoint path found in config.")
 
@@ -91,6 +97,13 @@ def get_output_path(config):
         raise ValueError("No output path found in config.")
 
 
+def get_frame_level(config):
+    return (
+        "frame_level" in config["data_info"].keys()
+        and config["data_info"]["frame_level"]
+    )
+
+
 def train(config):
     train_dl, val_dl = load_data(config=config["data_info"])
     model = LinearModel(config=config)
@@ -100,29 +113,28 @@ def train(config):
     trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
 
 
-def test(config):
-    test_dl = load_data(config=config["data_info"], test=True)
-
-    path_checkpoint = get_checkpoint_path(config)
+def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
     model = LinearModel.load_from_checkpoint(path_checkpoint)
-
     model.to("cuda")
     model.eval()
 
     all_scores = np.array([])
     all_labels = np.array([])
     all_paths = np.array([])
-    if "frame_level" in config["data_info"].keys() and config["data_info"]["frame_level"]:
+
+    if is_frame_level:
         all_frame_level_auc = []
-        
+
     with torch.no_grad():
-        for batch in tqdm.tqdm(test_dl):
+        for batch in tqdm.tqdm(dataloader):
             video_feats, audio_feats, labels, paths = batch
             video_feats, audio_feats = video_feats.to("cuda"), audio_feats.to("cuda")
 
-            if "frame_level" in config["data_info"].keys() and config["data_info"]["frame_level"]:
-                scores, local_scores = model.predict_scores_per_frame(video_feats, audio_feats)
-                
+            if is_frame_level:
+                scores, local_scores = model.predict_scores_per_frame(
+                    video_feats, audio_feats
+                )
+
                 local_scores = local_scores[0].cpu().numpy()
                 labels = labels.cpu().numpy().squeeze()
                 length = min(len(local_scores), len(labels))
@@ -134,7 +146,7 @@ def test(config):
                     all_frame_level_auc.append(frame_level_auc)
                 except ValueError:
                     pass
-            
+
                 all_scores = np.concatenate((all_scores, local_scores), axis=0)
                 all_labels = np.concatenate((all_labels, labels), axis=0)
                 all_paths = np.concatenate((all_paths, paths), axis=0)
@@ -146,35 +158,47 @@ def test(config):
                 all_labels = np.concatenate((all_labels, labels.cpu().numpy()), axis=0)
                 all_paths = np.concatenate((all_paths, paths), axis=0)
 
-    path_output = get_output_path(config)
     os.makedirs(path_output, exist_ok=True)
 
-    if not "frame_level" in config["data_info"].keys() or not config["data_info"]["frame_level"]:
-        pd.DataFrame({
-            "paths": all_paths,
-            "scores": all_scores,
-            "labels": all_labels
-        }).to_csv(os.path.join(path_output, "results.csv"), index=False)
+    if not is_frame_level:
+        pd.DataFrame(
+            {"paths": all_paths, "scores": all_scores, "labels": all_labels}
+        ).to_csv(os.path.join(path_output, "results.csv"), index=False)
+
+    with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
+        if is_frame_level:
+            f.write(
+                f"AUC-frame-level: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n"
+            )
+            f.write(f"AUC-frame-level-avg: {np.average(all_frame_level_auc)}\n")
+        else:
+            f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
+            f.write(
+                f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n"
+            )
+
+
+def test(config):
+    test_dl = load_data(config=config["data_info"], test=True)
+    path_checkpoint = get_checkpoint_path(config)
+    path_output = get_output_path(config)
+    is_frame_level = get_frame_level(config)
+    test1(
+        dataloader=test_dl,
+        path_checkpoint=path_checkpoint,
+        path_output=path_output,
+        is_frame_level=is_frame_level,
+    )
 
     with open(os.path.join(path_output, "tested_config.yaml"), "w") as f:
         yaml.safe_dump(config, f)
 
-    with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
-        if "frame_level" in config["data_info"].keys() and config["data_info"]["frame_level"]:
-            f.write(f"AUC-frame-level: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
-            f.write(f"AUC-frame-level-avg: {np.average(all_frame_level_auc)}\n")
-        else:
-            f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
-            f.write(f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n")
-        
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description='Training and testing loop'
-    )
+    parser = argparse.ArgumentParser(description="Training and testing loop")
 
-    parser.add_argument('--config_path')
-    parser.add_argument('--test', action='store_true')
+    parser.add_argument("--config_path")
+    parser.add_argument("--test", action="store_true")
     args = parser.parse_args()
 
     with open(args.config_path, "r") as f:
