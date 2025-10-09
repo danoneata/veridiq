@@ -9,7 +9,7 @@ from veridiq.linear_probing.datasets import AV1M_trainval_dataset
 
 
 DIR_CKPTS = Path("/data/av-datasets/ckpts_linear_probing/ckpts")
-DIR_OUTPUT = Path("output/calbiration/av1m/valid")
+DIR_OUTPUT = Path("output/calibration/av1m/valid")
 
 ROOT_PATHS = {
     "clip": "/data/av1m-test/other/CLIP_features/real+fake/",

@@ -6,7 +6,7 @@ import numpy as np
 import seaborn as sns
 import streamlit as st
 
-from sklearn.calibration import CalibrationDisplay
+from sklearn.calibration import CalibrationDisplay, _SigmoidCalibration
 from sklearn.metrics import roc_auc_score
 
 from veridiq.explanations.show_temporal_explanations import pred_to_proba
@@ -22,14 +22,24 @@ BASE_DIR = Path("/data/av-datasets/results_uni_multi_modal/outputs")
 sns.set(style="whitegrid", context="poster", font="Arial")
 
 
-def load_df(dataset_tr, dataset_te, model):
-    path = (
-        BASE_DIR
-        / ("results_" + dataset_tr)
-        / ("tested_on_" + dataset_te)
-        / model
-        / "results.csv"
-    )
+def get_folder_results_test(dataset_tr, dataset_te):
+    return BASE_DIR / ("results_" + dataset_tr) / ("tested_on_" + dataset_te)
+
+
+def get_folder_results_valid(dataset_tr, dataset_te):
+    assert dataset_tr == dataset_te == "av1m"
+    return Path("output/calibration/av1m/valid")
+
+
+GET_FOLDER_RESULTS = {
+    "test": get_folder_results_test,
+    "valid": get_folder_results_valid,
+}
+
+
+def load_df(dataset_tr, dataset_te, model, split="test"):
+    folder = GET_FOLDER_RESULTS[split](dataset_tr, dataset_te)
+    path = folder / model / "results.csv"
     return pd.read_csv(path)
 
 
@@ -111,8 +121,7 @@ def show_accuracy_rejection_curve(ax, df):
     ax.set_ylim(0, 100)
 
 
-def main():
-    st.set_page_config(layout="wide")
+def show_results_all():
     n_datasets = len(DATASETS_TEST)
     n_rows = 3
     W = 7
@@ -137,6 +146,63 @@ def main():
         fig.tight_layout()
         st.write(f"## Feature type: {f.upper()}")
         st.pyplot(fig)
+
+
+def show_calibration_before_after():
+    feature_type = "clip"
+
+    df = load_df(DATASET_TRAIN, DATASET_TRAIN, feature_type, split="valid")
+    scores = df["scores"].to_numpy()
+    labels = df["labels"].to_numpy()
+    probas = pred_to_proba(scores)
+    calib = _SigmoidCalibration()
+    calib.fit(probas, labels)
+    st.write(calib.a_, calib.b_)
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+    df0 = df.copy()
+    df1 = df.copy()
+    df0["probas"] = probas
+    df1["probas"] = calib.predict(probas)
+    show_calibration_plot(axs[0], df0)
+    show_calibration_plot(axs[1], df1)
+
+    fig.tight_layout()
+    col, _ = st.columns(2)
+    col.pyplot(fig)
+
+    n_rows = 2
+    n_datasets = len(DATASETS_TEST)
+    W = 7
+    H = 5
+    fig, axs = plt.subplots(
+        n_rows,
+        n_datasets,
+        figsize=(W * n_datasets, H * n_rows),
+        sharex=True,
+    )
+
+    for i, dataset_test in enumerate(DATASETS_TEST):
+        df0 = load_df("av1m", dataset_test, feature_type, split="test")
+        df0["probas"] = pred_to_proba(df0["scores"])
+
+        df1 = df0.copy()
+        df1["probas"] = calib.predict(df1["probas"].to_numpy())
+
+        show_calibration_plot(axs[0, i], df0)
+        show_calibration_plot(axs[1, i], df1)
+
+        axs[0, i].set_title(f"Test: {dataset_test.upper()}")
+        axs[1, i].set_title(f"Test: {dataset_test.upper()}")
+
+    fig.tight_layout()
+    st.pyplot(fig)
+
+
+def main():
+    st.set_page_config(layout="wide")
+    # show_results_all()
+    show_calibration_before_after()
 
 
 if __name__ == "__main__":
