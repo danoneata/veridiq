@@ -1,0 +1,38 @@
+data_info:
+  root_path: "/data/av1m-test/other/CLIP_features/real+fake"  # Data root path
+  csv_root_path: "/data/av-deepfake-1m/av_deepfake_1m/"  # Path to the folder containing split csv's
+  metadata_path: "/data/av-deepfake-1m/av_deepfake_1m/train_metadata.json"
+  fvfa_rvra_only: True
+  apply_l2: True  # Apply l2 normalization of input features (always used in our experiments)
+  input_type: "video"  # both, video, audio (choose either to use both modalities or just one of them)
+  dataset_name: "AV1M"
+  trimmed: False
+  frame_level: True
+
+callbacks:
+  logger:
+    log_path: "output/training-linear-probing/av1m-clip-conv-seed-3/logs"
+    name: "csv"
+  ckpt_args:
+    ckpt_dir: "output/training-linear-probing/av1m-clip-conv-seed-3/ckpts"
+    metric: "val_loss"
+    mode: "min"
+  early_stopping:
+    metric: "val_loss"
+    mode: "min"
+    patience: 10
+
+model_type: "conv"
+
+model_hparams:
+  input_type: "video"
+  feats_dim: 768
+  num_layers: 2
+  hidden_dim: 256
+  kernel_size: 5
+
+# ckpt_path: "/data/av-datasets/ckpts_linear_probing/ckpts/clip/model-epoch=98.ckpt"  # Path to the model ckpt
+# output_path: "output/training-linear-probing/av1m-clip/test"  # Path to output folder
+
+epochs: 100
+seed: 3

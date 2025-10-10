@@ -15,7 +15,7 @@ from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from veridiq.linear_probing.datasets import load_data
-from veridiq.linear_probing.model import LinearModel
+from veridiq.linear_probing.model import MyModel
 
 # from datasets import load_data
 # from model import LinearModel
@@ -106,7 +106,7 @@ def get_frame_level(config):
 
 def train(config):
     train_dl, val_dl = load_data(config=config["data_info"])
-    model = LinearModel(config=config)
+    model = MyModel(config=config)
     logger, callbacks = init_callbacks(config=config["callbacks"])
 
     trainer = L.Trainer(max_epochs=config["epochs"], logger=logger, callbacks=callbacks)
@@ -114,7 +114,7 @@ def train(config):
 
 
 def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
-    model = LinearModel.load_from_checkpoint(path_checkpoint)
+    model = MyModel.load_from_checkpoint(path_checkpoint)
     model.to("cuda")
     model.eval()
 
