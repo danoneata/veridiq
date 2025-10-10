@@ -25,6 +25,9 @@ DATA_PATHS = {
     "avlips": {
         "csv_root_path": "/data/avlips/AVLips",
     },
+    "bitdf": {
+        "csv_root_path": "/data/veridiq-shared-pg/dataset/filtered_tracks_processed",
+    }
 }
 
 
@@ -44,8 +47,6 @@ CONFIG = {
     "input_type": "video",
     "fvfa_rvra_only": True,
     "apply_l2": True,
-    "input_type": "video",
-    "dataset_name": "AV1M",
     "trimmed": False,
     "frame_level": False,
 }
@@ -67,12 +68,23 @@ DATASET_NAMES = {
 }
 
 
+OTHER_CONFIG = {
+    "av1m": {},
+    "favc": {},
+    "bitdf": {
+        "files_to_remove": "veridiq/linear_probing/files_to_remove.txt",
+    },
+    "avlips": {},
+}
+
+
 def get_config(dataset_name):
     return {
         **CONFIG,
-        **DATA_PATHS[dataset_name],
         "root_path": FEAT_PATHS[FEATURE_TYPE][dataset_name],
         "dataset_name": DATASET_NAMES[dataset_name],
+        **DATA_PATHS[dataset_name],
+        **OTHER_CONFIG[dataset_name],
     }
 
 
