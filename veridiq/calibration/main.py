@@ -199,10 +199,54 @@ def show_calibration_before_after():
     st.pyplot(fig)
 
 
+def show_calibration_feature_combination():
+    FUNCS = {
+        "calibration": show_calibration_plot,
+        "histogram": show_probas_histogram,
+        "accuracy-rejection": show_accuracy_rejection_curve,
+    }
+
+    with st.sidebar:
+        dataset_te = st.selectbox("Test dataset:", DATASETS_TEST, index=1)
+        to_show = st.selectbox("Show:", list(FUNCS.keys()), index=0)
+
+    to_show_func = FUNCS[to_show]
+    dataset_tr = "av1m"
+    feature_types = ["clip", "wav2vec", "video_mae", "avh_audio", "avh_video"]
+    n_rows = len(feature_types)
+    n_cols = len(feature_types)
+    W = 7
+    H = 5
+    fig, axs = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(W * n_cols, H * n_rows),
+        sharex=True,
+    )
+
+    for i, f1 in enumerate(feature_types):
+        for j, f2 in enumerate(feature_types):
+            df1 = load_df(dataset_tr, dataset_te, f1, split="test")
+            df2 = load_df(dataset_tr, dataset_te, f2, split="test")
+            df1["probas"] = pred_to_proba(df1["scores"])
+            df2["probas"] = pred_to_proba(df2["scores"])
+            df = df1.copy()
+            df["probas"] = (df1["probas"] + df2["probas"]) / 2
+            to_show_func(axs[i, j], df)
+            if i == 0:
+                axs[i, j].set_title(f2)
+            if j == 0:
+                axs[i, j].set_ylabel(f1)
+
+    fig.tight_layout()
+    st.pyplot(fig)
+
+
 def main():
     st.set_page_config(layout="wide")
     # show_results_all()
-    show_calibration_before_after()
+    # show_calibration_before_after()
+    show_calibration_feature_combination()
 
 
 if __name__ == "__main__":
