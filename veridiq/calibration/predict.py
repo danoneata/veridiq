@@ -1,4 +1,5 @@
 import sys
+import click
 
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from torch.utils.data import DataLoader
 
 from veridiq.linear_probing.train_test import test1, get_checkpoint_path_from_folder
 from veridiq.linear_probing.datasets import AV1M_test_dataset, PerFileDataset
+from veridiq.utils import implies
 
 
 DIR_CKPTS = Path("output/training-linear-probing")
@@ -27,7 +29,7 @@ DATA_PATHS = {
     },
     "bitdf": {
         "csv_root_path": "/data/veridiq-shared-pg/dataset/filtered_tracks_processed",
-    }
+    },
 }
 
 
@@ -48,7 +50,6 @@ CONFIG = {
     "fvfa_rvra_only": True,
     "apply_l2": True,
     "trimmed": False,
-    "frame_level": False,
 }
 
 
@@ -78,26 +79,56 @@ OTHER_CONFIG = {
 }
 
 
-def get_config(dataset_name):
+def get_config(dataset_name, frame_level):
     return {
         **CONFIG,
         "root_path": FEAT_PATHS[FEATURE_TYPE][dataset_name],
         "dataset_name": DATASET_NAMES[dataset_name],
+        "frame_level": frame_level,
         **DATA_PATHS[dataset_name],
         **OTHER_CONFIG[dataset_name],
     }
 
 
-def predict(config_name, dataset_te):
-    config = get_config(dataset_te)
+def predict(config_name, dataset_te, frame_level):
+    config = get_config(dataset_te, frame_level)
     dataset = DATASETS[dataset_te](config)
     dataloader = DataLoader(dataset, shuffle=False, batch_size=1)
     folder = DIR_CKPTS / config_name
     path_checkpoint = get_checkpoint_path_from_folder(folder / "ckpts")
     path_output = folder / "predict" / "{}".format(dataset_te)
-    test1(dataloader, path_checkpoint, path_output)
+    test1(dataloader, path_checkpoint, path_output, frame_level)
 
 
-config_name = sys.argv[1]
-dataset_te = sys.argv[2]
-predict(config_name, dataset_te)
+@click.command()
+@click.option(
+    "-c",
+    "--config-name",
+    "config_name",
+    type=str,
+    required=True,
+    help="Name of the config (folder in output/training-linear-probing).",
+)
+@click.option(
+    "-d",
+    "--dataset-te",
+    "dataset_te",
+    type=str,
+    required=True,
+    help="Name of the dataset to test (e.g., av1m, favc, avlips, bitdf).",
+)
+@click.option(
+    "--frame-level",
+    "frame_level",
+    is_flag=True,
+    help="Whether to do frame-level prediction (only supported for av1m).",
+)
+def main(config_name, dataset_te, frame_level: bool):
+    assert implies(
+        frame_level, dataset_te == "av1m"
+    ), "Frame-level only supported for av1m."
+    predict(config_name, dataset_te, frame_level)
+
+
+if __name__ == "__main__":
+    main()
