@@ -1,3 +1,5 @@
+import json
+
 from pathlib import Path
 
 import click
@@ -5,6 +7,8 @@ import pandas as pd
 import numpy as np
 
 from sklearn.metrics import roc_auc_score
+
+from veridiq.linear_probing.train_test import evaluate_frame_level
 
 
 DATASETS = [
@@ -59,8 +63,34 @@ def get_results_dfeval(config_names, dataset):
     return evaluate(df)
 
 
+def get_results_localization(config_names, dataset):
+    def load_frame_level_results(config_name):
+        path = BASE_DIR / config_name / "predict" / dataset / "results-frame-level.json"
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def ensemble_scores(data):
+        scores = np.stack([d["scores-local"] for d in data], axis=0)
+        scores = np.mean(scores, axis=0)
+        return scores
+
+    def ensemble_datum(data):
+        return {
+            "path": data[0]["path"],
+            "scores": data[0]["scores"],
+            "labels": data[0]["labels"],
+            "scores-local": ensemble_scores(data),
+            "labels-local": data[0]["labels-local"],
+        }
+
+    data_all = [load_frame_level_results(c) for c in config_names]
+    ensembled_data = [ensemble_datum(data) for data in zip(*data_all)]
+    return 100 * evaluate_frame_level(ensembled_data)
+
+
 GET_RESULTS_FUNCS = {
     "av1m": get_results_default,
+    "av1m-loc": get_results_localization,
     "favc": get_results_default,
     "avlips": get_results_default,
     "dfeval": get_results_dfeval,
@@ -68,7 +98,14 @@ GET_RESULTS_FUNCS = {
 
 
 def get_results(config_names):
-    return [GET_RESULTS_FUNCS[dataset](config_names, dataset) for dataset in DATASETS]
+    RESULTS_CONFIGS = [
+        ("av1m", "av1m"),
+        ("av1m-loc", "av1m"),
+        ("favc", "favc"),
+        ("avlips", "avlips"),
+        ("dfeval", "dfeval"),
+    ]
+    return [GET_RESULTS_FUNCS[r](config_names, d) for r, d in RESULTS_CONFIGS]
 
 
 @click.command()
@@ -84,7 +121,6 @@ def get_results(config_names):
 def main(config_names):
     assert len(config_names) >= 1, "At least one config name must be provided."
     results = get_results(config_names)
-    results = [results[0], np.nan, *results[1:]]
     print(",".join(["{:.2f}".format(r) for r in results]))
 
 

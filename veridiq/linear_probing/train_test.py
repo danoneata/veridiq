@@ -1,4 +1,5 @@
 import argparse
+import json
 import random
 import tqdm
 import os
@@ -13,6 +14,7 @@ import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from sklearn.metrics import average_precision_score, roc_auc_score
+from toolz import dissoc, take
 
 from veridiq.linear_probing.datasets import load_data
 from veridiq.linear_probing.model import MyModel
@@ -113,69 +115,91 @@ def train(config):
     trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
 
 
+def evaluate_frame_level(data):
+    def eval1(datum):
+        return roc_auc_score(
+            y_score=datum["scores-local"],
+            y_true=datum["labels-local"],
+        ) 
+
+    scores = [eval1(d) for d in data if d["labels"] == 1]
+    return np.mean(scores)
+
+
 def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
     model = MyModel.load_from_checkpoint(path_checkpoint)
     model.to("cuda")
     model.eval()
 
-    all_scores = np.array([])
-    all_labels = np.array([])
-    all_paths = np.array([])
+    def test_frame_level_yes(batch):
+        video_feats, audio_feats, local_labels, paths = batch
+        video_feats, audio_feats = video_feats.to("cuda"), audio_feats.to("cuda")
 
-    if is_frame_level:
-        all_frame_level_auc = []
+        scores, local_scores = model.predict_scores_per_frame(video_feats, audio_feats)
+
+        scores = scores.item()
+        labels = local_labels.max()
+        labels = labels.item()
+
+        local_scores = local_scores[0].cpu().numpy()
+        local_labels = local_labels.cpu().numpy().squeeze()
+        length = min(len(local_scores), len(local_labels))
+        local_scores = local_scores[:length]
+        local_labels = local_labels[:length]
+
+        return {
+            "path": paths[0],
+            "scores": scores,
+            "labels": labels,
+            "scores-local": local_scores.tolist(),
+            "labels-local": local_labels.tolist(),
+        }
+
+    def test1_frame_level_no(batch):
+        video_feats, audio_feats, labels, paths = batch
+        video_feats, audio_feats = video_feats.to("cuda"), audio_feats.to("cuda")
+
+        scores = model.predict_scores(video_feats, audio_feats)
+        scores = scores.item()
+        labels = labels.item()
+
+        return {
+            "path": paths[0],
+            "scores": scores,
+            "labels": labels,
+        }
+
+    TEST_FUNCS = {
+        True: test_frame_level_yes,
+        False: test1_frame_level_no,
+    }
 
     with torch.no_grad():
-        for batch in tqdm.tqdm(dataloader):
-            video_feats, audio_feats, labels, paths = batch
-            video_feats, audio_feats = video_feats.to("cuda"), audio_feats.to("cuda")
-
-            if is_frame_level:
-                scores, local_scores = model.predict_scores_per_frame(
-                    video_feats, audio_feats
-                )
-
-                local_scores = local_scores[0].cpu().numpy()
-                labels = labels.cpu().numpy().squeeze()
-                length = min(len(local_scores), len(labels))
-                local_scores = local_scores[:length]
-                labels = labels[:length]
-
-                try:
-                    frame_level_auc = roc_auc_score(y_score=local_scores, y_true=labels)
-                    all_frame_level_auc.append(frame_level_auc)
-                except ValueError:
-                    pass
-
-                all_scores = np.concatenate((all_scores, local_scores), axis=0)
-                all_labels = np.concatenate((all_labels, labels), axis=0)
-                all_paths = np.concatenate((all_paths, paths), axis=0)
-
-            else:
-                scores = model.predict_scores(video_feats, audio_feats)
-
-                all_scores = np.concatenate((all_scores, scores.cpu().numpy()), axis=0)
-                all_labels = np.concatenate((all_labels, labels.cpu().numpy()), axis=0)
-                all_paths = np.concatenate((all_paths, paths), axis=0)
+        data = [TEST_FUNCS[is_frame_level](batch) for batch in tqdm.tqdm(dataloader)]
 
     os.makedirs(path_output, exist_ok=True)
 
-    if not is_frame_level:
-        pd.DataFrame(
-            {"paths": all_paths, "scores": all_scores, "labels": all_labels}
-        ).to_csv(os.path.join(path_output, "results.csv"), index=False)
+    data_ss = [dissoc(d, "scores-local", "labels-local") for d in data]
+    df = pd.DataFrame(data_ss)
+    df.to_csv(os.path.join(path_output, "results.csv"), index=False)
 
-    with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
-        if is_frame_level:
-            f.write(
-                f"AUC-frame-level: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n"
-            )
-            f.write(f"AUC-frame-level-avg: {np.average(all_frame_level_auc)}\n")
-        else:
-            f.write(f"AUC: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n")
-            f.write(
-                f"AP: {average_precision_score(y_score=all_scores, y_true=all_labels)}\n"
-            )
+    if is_frame_level:
+        path = os.path.join(path_output, "results-frame-level.json")
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    path = os.path.join(path_output, "eval_results.txt")
+    with open(path, "w") as f:
+        score_auc = roc_auc_score(y_score=df["scores"], y_true=df["labels"])
+        score_ap = average_precision_score(y_score=df["scores"], y_true=df["labels"])
+        f.write(f"AUC: {score_auc}\n")
+        f.write(f"AP: {score_ap}\n")
+
+    if is_frame_level:
+        path = os.path.join(path_output, "eval_results-frame-level.txt")
+        with open(path, "w") as f:
+            score_auc = evaluate_frame_level(data)
+            f.write(f"AUC-frame-level: {score_auc}\n")
 
 
 def test(config):
@@ -191,7 +215,7 @@ def test(config):
     )
 
     with open(os.path.join(path_output, "tested_config.yaml"), "w") as f:
-        yaml.safe_dump(config, f)
+    yaml.safe_dump(config, f)
 
 
 if __name__ == "__main__":
