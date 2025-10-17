@@ -215,7 +215,7 @@ def test(config):
     )
 
     with open(os.path.join(path_output, "tested_config.yaml"), "w") as f:
-    yaml.safe_dump(config, f)
+        yaml.safe_dump(config, f)
 
 
 if __name__ == "__main__":
