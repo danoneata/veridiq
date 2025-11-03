@@ -5,7 +5,8 @@ import h5py
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+import warnings
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 
 from toolz import dissoc
 
@@ -30,11 +31,18 @@ class AV1M_trainval_dataset(Dataset):
         if config["dataset_name"] == "AV1M":
             self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
             self.feats_dir = os.path.join(self.root_path, self.split)
+            if not os.path.exists(self.feats_dir):
+                self.feats_dir = self.root_path
         elif config["dataset_name"] == "FAVC":
             self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_split.csv"))
-            self.feats_dir = self.root_path
+            self.feats_dir = os.path.join(self.root_path, self.split)
+            if not os.path.exists(self.feats_dir):
+                self.feats_dir = self.root_path
             self.df['path'] = self.df['full_path'].apply(lambda x: x.replace("FakeAVCeleb/", ""))
-            self.df['label'] = self.df['category'].map({'A': 0, 'D': 1})
+            if "fvfa_rvra_only" in config and config["fvfa_rvra_only"]:
+                self.df['label'] = self.df['category'].map({'A': 0, 'D': 1})
+            else:
+                self.df['label'] = self.df['category'].map({'A': 0, 'B': 1, 'C': 1, 'D': 1})
             self.df = self.df[~self.df['path'].isin(INVALID_VIDS)]
         elif config["dataset_name"] == "BitDF":
             self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
@@ -87,20 +95,30 @@ class AV1M_trainval_dataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
+        base = os.path.join(self.feats_dir, row["path"][:-4])
         try:
-            feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz"), allow_pickle=True)
+            feats = np.load(base + ".npz", allow_pickle=True)
         except FileNotFoundError:
             try:
-                feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npy"), allow_pickle=True)
+                feats = np.load(base + ".npy", allow_pickle=True)
             except FileNotFoundError:
-                feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz.npy"), allow_pickle=True)
-        except:
-            print(os.path.join(self.feats_dir, row["path"][:-4] + ".npz"))
-
+                try:
+                    feats = np.load(base + ".mp4.npy", allow_pickle=True)
+                    if isinstance(feats, np.lib.npyio.NpzFile):
+                        feats = feats.item()
+                except FileNotFoundError:
+                    try:
+                        feats = np.load(base + ".npz.npy", allow_pickle=True)
+                    except FileNotFoundError:
+                        warnings.warn(f"Features not found for {row['path']} in {self.feats_dir}")
+                        return None # usually some samples from FAVC
         label = int(row["label"])
 
         if self.config["input_type"] == "both":
-            video = feats['visual']
+            try:
+                video = feats['visual']
+            except:
+                video = feats['video']
             audio = feats['audio']
         elif self.config["input_type"] == "audio":
             try:
@@ -113,7 +131,10 @@ class AV1M_trainval_dataset(Dataset):
             video = -np.ones((audio.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "video":
             try:
-                video = feats['visual']
+                try:
+                    video = feats['visual']
+                except:
+                    video = feats['video']
                 if len(video.shape) > 2:
                     video = video.reshape(-1, video.shape[-1])
             except:
@@ -129,8 +150,10 @@ class AV1M_trainval_dataset(Dataset):
             raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
-            video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
-            audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            if self.config["input_type"] in ["both", "multimodal", "video"]:
+                video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
+            if self.config["input_type"] in ["both", "multimodal", "audio"]:
+                audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
 
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
 
@@ -314,8 +337,12 @@ class AV1M_test_dataset(Dataset):
             audio = self.audio_feats[idx]
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
-            video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
-            audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            if self.config["input_type"] in ["both", "multimodal", "video"]:
+                video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
+            if self.config["input_type"] in ["both", "multimodal", "audio"]:
+                audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            # video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
+            # audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
 
         label = self.labels[path]
         if len(video.shape) > 2:
@@ -346,6 +373,9 @@ class FakeAVCeleb_Dataset(Dataset):
         self.features, self.paths = np.array([]), np.array([])
 
         for folder_name in os.listdir(self.root_path):
+            full_path = os.path.join(self.root_path, folder_name)
+            if not os.path.isdir(full_path):
+                continue
             feats = np.load(os.path.join(self.root_path, folder_name, f"{self.input_type}.npy"), allow_pickle=True)
             self.features = np.concatenate((self.features, feats))
 
@@ -381,19 +411,42 @@ class FakeAVCeleb_Dataset(Dataset):
 ###### ######
 
 class PerFileDataset(Dataset):
-    def __init__(self, config):
+    def __init__(self, config, split="test"):
         self.config = config
 
         self.root_path = self.config["root_path"]
         self.csv_root_path = self.config["csv_root_path"]
 
         if config["dataset_name"] == "BitDF":
-            self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
-            self.df['path'] = self.df['full_file_path']
-            self.df = self.df[self.df['original_split'] != "train"]
+            if split == "test":
+                self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
+                self.df['path'] = self.df['full_file_path']
+                self.df = self.df[self.df['original_split'] != "train"]
+            elif split == "val":
+                self.df = pd.read_csv(os.path.join(self.csv_root_path, "val_labels.csv"))
+                self.df['path'] = self.df['full_file_path']
+            elif split == "train":
+                self.df = pd.read_csv(os.path.join(self.csv_root_path, "train_labels.csv"))
+                self.df['path'] = self.df['full_file_path']
             self.df = self.df[self.df["label"] != "unknown"]
+        elif config["dataset_name"] == "AVLips":
+            if split =="test":
+                # all files (test_labels.csv = metadata.csv)
+                self.df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv"))
+            else:
+                self.df = pd.read_csv(os.path.join(self.csv_root_path, "metadata.csv"))
+                # deterministic shuffle
+                self.df = self.df.sample(frac=1, random_state=42).reset_index(drop=True)
+                split_idx = int(0.8 * len(self.df))
+                # train/val split
+                if split == "train":        
+                    self.df = self.df.iloc[:split_idx]
+                elif split == "val":
+                    self.df = self.df.iloc[split_idx:]
         else:
-            self.df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv"))
+            # self.df = pd.read_csv(os.path.join(self.csv_root_path, "test_labels.csv")) # other option
+            raise ValueError(f"Unsuported PerFileDataset dataset_name: {config['dataset_name']}")
+
 
         self.feats_dir = self.root_path
 
@@ -415,7 +468,11 @@ class PerFileDataset(Dataset):
             feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz"), allow_pickle=True)
         except FileNotFoundError:
             try:
-                feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npy"), allow_pickle=True)
+                try:
+                    feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npy"), allow_pickle=True)
+                except:
+                    feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".mp4.npy"), allow_pickle=True)
+                    feats = feats.item()
             except FileNotFoundError:
                 feats = np.load(os.path.join(self.feats_dir, row["path"][:-4] + ".npz.npy"), allow_pickle=True)
 
@@ -430,7 +487,8 @@ class PerFileDataset(Dataset):
             label = int(row["label"])
 
         if self.config["input_type"] == "both":
-            video = feats['visual']
+            # video = feats['visual']
+            video = feats['video']
             audio = feats['audio']
         elif self.config["input_type"] == "audio":
             try:
@@ -443,7 +501,8 @@ class PerFileDataset(Dataset):
             video = -np.ones((audio.shape[0], 1024)) * np.inf
         elif self.config["input_type"] == "video":
             try:
-                video = feats['visual']
+                # video = feats['visual']
+                video = feats['video']
                 if len(video.shape) > 2:
                     video = video.reshape(-1, video.shape[-1])
             except:
@@ -463,8 +522,12 @@ class PerFileDataset(Dataset):
             raise ValueError(f"input_type should be both, multimodal, video or audio! Got: " + self.config["input_type"])
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
-            video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
-            audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            if self.config["input_type"] in ["both", "multimodal", "video"]:
+                video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
+            if self.config["input_type"] in ["both", "multimodal", "audio"]:
+                audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            # video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
+            # audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
 
         return torch.tensor(video, dtype=torch.float32), torch.tensor(audio, dtype=torch.float32), label, row["path"][:-4] + ".npz"  # video, audio, label, path
 
@@ -522,11 +585,66 @@ def load_data(config, test=False):
             config_rest = dissoc(config, "dataset_name")
             train_ds = DanDataset(split="train", **config_rest)
             val_ds = DanDataset(split="val", **config_rest)
-        else:
+        elif config["dataset_name"] == "AV1M":
             train_ds = AV1M_trainval_dataset(config, split="train")
             val_ds = AV1M_trainval_dataset(config, split="val")
+        elif config["dataset_name"] == "all":
+            dataset_map = {
+                "AV1M": AV1M_trainval_dataset,
+                "FAVC_old": FakeAVCeleb_Dataset,
+                "FAVC": AV1M_trainval_dataset,
+                "AVLips": PerFileDataset,
+                "BitDF": PerFileDataset,
+                "ExDDV": DanDataset
+            }
 
-        train_dl = DataLoader(train_ds, shuffle=True, batch_size=1)
-        val_dl = DataLoader(val_ds, shuffle=False, batch_size=1)
+            # build dynamically depending on available keys in config
+            dataset_classes = {}
+            for key in dataset_map.keys():
+                root_key = f"root_path_{key}"
+                if root_key in config.keys():
+                    dataset_classes[key] = dataset_map[key]
+
+            train_datasets = []
+            val_datasets = []
+
+            for name, dataset_class in dataset_classes.items():
+                # copy config and update the root path for each dataset
+                root_path = config.get(f"root_path_{name}")
+                csv_root_path = config.get(f"csv_root_path_{name}")
+
+                if root_path is None or csv_root_path is None:
+                    print(f"Skipping {name}, missing paths")
+                    continue
+                
+                sub_config = config.copy()
+                sub_config["root_path"] = root_path
+                sub_config["csv_root_path"] = csv_root_path
+                sub_config["dataset_name"] = name
+
+                print(f"Adding dataset {name} from {sub_config['root_path']}")
+
+                train_dataset = dataset_class(sub_config, split="train")
+                val_dataset = dataset_class(sub_config, split="val")
+                print(f"Train len: {len(train_dataset)}; Val len: {len(val_dataset)}")
+                    
+                train_datasets.append(train_dataset)
+                val_datasets.append(val_dataset)
+
+            # concatenate all datasets
+            train_ds = ConcatDataset(train_datasets)
+            val_ds = ConcatDataset(val_datasets)
+        else:
+            raise ValueError(f"Unknown dataset_name: {dataset_name}")
+
+        def collate_skip_none(batch):
+            batch = [b for b in batch if b is not None]
+            if len(batch) == 0:
+                # create a dummy batch instead of returning None
+                return torch.utils.data.default_collate([(torch.empty(0), torch.empty(0), torch.empty(0), "")])
+            return torch.utils.data.default_collate(batch)
+
+        train_dl = DataLoader(train_ds, shuffle=True, batch_size=1, collate_fn=collate_skip_none, num_workers = 16)
+        val_dl = DataLoader(val_ds, shuffle=False, batch_size=1, collate_fn=collate_skip_none, num_workers = 16)
 
         return train_dl, val_dl

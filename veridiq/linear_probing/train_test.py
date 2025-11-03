@@ -118,8 +118,13 @@ def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
     model.to("cuda")
     model.eval()
 
-    all_scores = np.array([])
-    all_labels = np.array([])
+    if is_frame_level:
+        # holds lists of per-frame scores/labels
+        all_scores = []
+        all_labels = []
+    else:
+        all_scores = np.array([])
+        all_labels = np.array([])
     all_paths = np.array([])
 
     if is_frame_level:
@@ -144,11 +149,12 @@ def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
                 try:
                     frame_level_auc = roc_auc_score(y_score=local_scores, y_true=labels)
                     all_frame_level_auc.append(frame_level_auc)
+
                 except ValueError:
                     pass
 
-                all_scores = np.concatenate((all_scores, local_scores), axis=0)
-                all_labels = np.concatenate((all_labels, labels), axis=0)
+                all_scores.append(local_scores)
+                all_labels.append(labels)
                 all_paths = np.concatenate((all_paths, paths), axis=0)
 
             else:
@@ -164,11 +170,24 @@ def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
         pd.DataFrame(
             {"paths": all_paths, "scores": all_scores, "labels": all_labels}
         ).to_csv(os.path.join(path_output, "results.csv"), index=False)
+    else:
+        results = []
+        for path, scores, labels in zip(all_paths, all_scores, all_labels):
+            results.append({
+                "paths": path,
+                "scores": list(np.array(scores)),
+                "labels": list(np.array(labels)),
+            })
+
+        df = pd.DataFrame(results)
+
+        # Save each entry as a list (will appear as "[...]" in CSV)
+        df.to_csv(os.path.join(path_output, "results_frame_level.csv"), index=False)
 
     with open(os.path.join(path_output, "eval_results.txt"), "w") as f:
         if is_frame_level:
             f.write(
-                f"AUC-frame-level: {roc_auc_score(y_score=all_scores, y_true=all_labels)}\n"
+                f"AUC-frame-level: {roc_auc_score(y_score=np.concatenate(all_scores), y_true=np.concatenate(all_labels))}\n"
             )
             f.write(f"AUC-frame-level-avg: {np.average(all_frame_level_auc)}\n")
         else:

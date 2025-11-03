@@ -18,6 +18,9 @@ class LinearModel(L.LightningModule):
         video_feats, audio_feats = input_feats[0], input_feats[1]
 
         if self.input_type == "both":
+            if video_feats.shape[1] != audio_feats.shape[1]:
+                min_len = min(video_feats.shape[1], audio_feats.shape[1])
+                video_feats, audio_feats = video_feats[:, :min_len], audio_feats[:, :min_len]
             fused_features = torch.cat((video_feats, audio_feats), dim=-1)
         elif self.input_type == "audio":
             fused_features = audio_feats
@@ -43,6 +46,8 @@ class LinearModel(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         video_feats, audio_feats, labels, _ = batch
+        if video_feats.numel() == 0:
+            return
 
         output = self.forward((video_feats, audio_feats))
         score = output.unsqueeze(1)
@@ -55,7 +60,9 @@ class LinearModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         video_feats, audio_feats, labels, _ = batch
-
+        if video_feats.numel() == 0:
+            return
+            
         output = self.forward((video_feats, audio_feats))
         score = output.unsqueeze(1)
         score = torch.cat((-score, score), 1)
