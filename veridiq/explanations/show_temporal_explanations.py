@@ -37,6 +37,7 @@ FEATURES_DIR = {
     "av-hubert-v": Path("/data/av-deepfake-1m/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features"),
     "clip": Path("/data/av1m-test/other/CLIP_features/test"),
     "fsfm": Path("/data/audio-video-deepfake-3/FSFM_face_features/test_face_fix"),
+    "wav2vec": Path("/data/av-deepfake-1m-features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b/test"),
     "videomae": Path("/data/audio-video-deepfake-2/Video_MAE_large/test"),
 }
 
@@ -44,6 +45,7 @@ SUBSAMPLING_FACTORS = {
     "av-hubert-v": 1,
     "clip": 1,
     "fsfm": 1,
+    "wav2vec": 1,
     "videomae": 2,
 }
 
@@ -68,7 +70,15 @@ def load_test_paths(feature_extractor_type):
 
 
 def load_test_features(feature_extractor_type):
-    path = FEATURES_DIR[feature_extractor_type] / "video.npy"
+    FEATURE_TO_MODALITY = {
+        "av-hubert-v": "video",
+        "clip": "video",
+        "fsfm": "video",
+        "wav2vec": "audio",
+        "videomae": "video",
+    }
+    modality = FEATURE_TO_MODALITY[feature_extractor_type]
+    path = FEATURES_DIR[feature_extractor_type] / (modality + ".npy")
     features = np.load(path, allow_pickle=True)
     return features
 
@@ -166,6 +176,7 @@ GET_PER_FRAME_LABELS = {
     "av-hubert-v": get_per_frame_labels_default,
     "clip": get_per_frame_labels_default,
     "fsfm": get_per_frame_labels_default,
+    "wav2vec": get_per_frame_labels_default,
     "videomae": get_per_frame_labels_video_mae,
 }
 
@@ -450,7 +461,7 @@ if __name__ == "__main__":
         feature_extractor_type = st.selectbox(
             "Feature Extractor",
             options=FEATURES_DIR.keys(),
-            index=0,
+            index=3,
         )
         sorter = st.selectbox(
             "Sort by",
