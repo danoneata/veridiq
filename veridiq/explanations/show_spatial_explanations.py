@@ -45,7 +45,7 @@ def add_location(frame, loc, color=(255, 0, 0)):
 
     # Use for radius and thickness relative to the frame size.
     radius = int(0.05 * (h + w) / 2)
-    thickness = int(0.005 * (h + w) / 2)
+    thickness = int(0.01 * (h + w) / 2)
 
     return cv2.circle(
         frame,
