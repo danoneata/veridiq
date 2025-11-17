@@ -26,8 +26,10 @@ class AV1M_RealOnly_Dataset(Dataset):
 
         self.audio_root_path = self.config["audio_root_path"]
         self.video_root_path = self.config["video_root_path"]
+        self.multimodal_root_path = self.config["multimodal_root_path"]
         self.audio_feats_dir = os.path.join(self.audio_root_path, self.split)
-        self.video_feats_dir = os.path.join(self.video_root_path, "real_" + self.split)  # TODO: find a better workaround for CLIP
+        self.video_feats_dir = os.path.join(self.video_root_path, self.split)  # TODO: find a better workaround for CLIP
+        self.multimodal_feats_dir = os.path.join(self.multimodal_root_path, self.split)
 
     def __len__(self):
         return len(self.df.index)
@@ -64,16 +66,24 @@ class AV1M_RealOnly_Dataset(Dataset):
                 video = video[:-residual]
             elif residual < 0:
                 audio = audio[:residual]
+            multi = -np.ones((audio.shape[0], 1024))
         elif self.config["modality"] == "audio":
             audio = self._get_feats(row, "audio", self.audio_feats_dir)
             video = -np.ones((audio.shape[0], 1024))
+            multi = -np.ones((audio.shape[0], 1024))
         elif self.config["modality"] == "video":
             video = self._get_feats(row, "visual", self.video_feats_dir)
             audio = -np.ones((video.shape[0], 1024))
+            multi = -np.ones((video.shape[0], 1024))
+        elif self.config["modality"] == "multimodal":
+            multi = self._get_feats(row, "multimodal", self.multimodal_feats_dir)
+            audio = -np.ones((multi.shape[0], 1024))
+            video = -np.ones((multi.shape[0], 1024))
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            multi = multi / (np.linalg.norm(multi, ord=2, axis=-1, keepdims=True))
 
         if self.config["modality"] == "both":
             features = np.concatenate((video, audio), axis=-1)
@@ -81,6 +91,8 @@ class AV1M_RealOnly_Dataset(Dataset):
             features = audio
         elif self.config["modality"] == "video":
             features = video
+        elif self.config["modality"] == "multimodal":
+            features = multi
 
         return torch.tensor(features), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
 
@@ -104,6 +116,9 @@ class CombinedForm_Dataset(Dataset):
             self.paths_vid = np.load(os.path.join(self.config["video_root_path"], "paths.npy"), allow_pickle=True)
             self.audio_feats = None
             self.video_feats = np.load(os.path.join(self.config["video_root_path"], "video.npy"), allow_pickle=True)
+        elif self.config["modality"] == "multimodal":
+            self.paths_multi = np.load(os.path.join(self.config["multimodal_root_path"], "paths.npy"), allow_pickle=True)
+            self.multimodal_feats = np.load(os.path.join(self.config["multimodal_root_path"], "multimodal.npy"), allow_pickle=True)
 
         self.csv_root_path = self.config["csv_root_path"]
         if self.config["name"] == "AV1M":
@@ -121,7 +136,10 @@ class CombinedForm_Dataset(Dataset):
 
         removed_rows = []
         for idx, row in self.df.iterrows():
-            if (self.paths_aud is not None and row['path'] not in self.paths_aud) or (self.paths_vid is not None and row['path'] not in self.paths_vid):
+            if self.config["modality"] == "multimodal":
+                if row['path'] not in self.paths_multi:
+                    removed_rows.append(idx)
+            elif (self.paths_aud is not None and row['path'] not in self.paths_aud) or (self.paths_vid is not None and row['path'] not in self.paths_vid):
                 removed_rows.append(idx)
         self.df = self.df.drop(removed_rows)
         self._get_indices()
@@ -150,6 +168,7 @@ class CombinedForm_Dataset(Dataset):
     def _get_indices(self):
         self.indices_aud = {}
         self.indices_vid = {}
+        self.indices_multi = {}
 
         for _, row in self.df.iterrows():
             path = row['path']
@@ -165,6 +184,12 @@ class CombinedForm_Dataset(Dataset):
                 if len(indices) != 1:
                     raise ValueError(f"Multiple or no values for path (video): {path}")
                 self.indices_vid[path] = indices[0]
+
+            if self.config["modality"] == "multimodal":
+                indices = np.where(self.paths_multi == path)[0]
+                if len(indices) != 1:
+                    raise ValueError(f"Multiple or no values for path (multimodal): {path}")
+                self.indices_multi[path] = indices[0]
 
     def __len__(self):
         return len(self.df.index)
@@ -185,18 +210,27 @@ class CombinedForm_Dataset(Dataset):
                 video = video[:-residual]
             elif residual < 0:
                 audio = audio[:residual]
+            multi = -np.ones((audio.shape[0], 1024))
         elif self.config["modality"] == "audio":
             audio = self.audio_feats[self.indices_aud[path]]
             video = -np.ones((audio.shape[0], 1024))
+            multi = -np.ones((audio.shape[0], 1024))
             assert self.paths_aud[self.indices_aud[path]] == path
         elif self.config["modality"] == "video":
             video = self.video_feats[self.indices_vid[path]]
             audio = -np.ones((video.shape[0], 1024))
+            multi = -np.ones((video.shape[0], 1024))
             assert self.paths_vid[self.indices_vid[path]] == path
+        elif self.config["modality"] == "multimodal":
+            multi = self.multimodal_feats[self.indices_multi[path]]
+            audio = -np.ones((multi.shape[0], 1024))
+            video = -np.ones((multi.shape[0], 1024))
+            assert self.paths_multi[self.indices_multi[path]] == path
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            multi = multi / (np.linalg.norm(multi, ord=2, axis=-1, keepdims=True))
 
         if self.config["modality"] == "both":
             features = np.concatenate((video, audio), axis=-1)
@@ -204,6 +238,8 @@ class CombinedForm_Dataset(Dataset):
             features = audio
         elif self.config["modality"] == "video":
             features = video
+        elif self.config["modality"] == "multimodal":
+            features = multi
 
         return torch.tensor(features, dtype=torch.float32), torch.ones(features.shape[0]), labels, path  # features, mask, labels, path
 
@@ -217,6 +253,7 @@ class PerFile_Dataset(Dataset):
 
         self.audio_feats_dir = self.config["audio_root_path"]
         self.video_feats_dir = self.config["video_root_path"]
+        self.multimodal_feats_dir = self.config["multimodal_root_path"]
 
         self.df['path'] = self.df['full_file_path']
 
@@ -273,16 +310,24 @@ class PerFile_Dataset(Dataset):
                 video = video[:-residual]
             elif residual < 0:
                 audio = audio[:residual]
+            multi = -np.ones((audio.shape[0], 1024))
         elif self.config["modality"] == "audio":
             audio = self._get_feats(row, "audio", self.audio_feats_dir)
             video = -np.ones((audio.shape[0], 1024))
+            multi = -np.ones((audio.shape[0], 1024))
         elif self.config["modality"] == "video":
             video = self._get_feats(row, "visual", self.video_feats_dir)
             audio = -np.ones((video.shape[0], 1024))
+            multi = -np.ones((video.shape[0], 1024))
+        elif self.config["modality"] == "multimodal":
+            multi = self._get_feats(row, "multimodal", self.multimodal_feats_dir)
+            audio = -np.ones((multi.shape[0], 1024))
+            video = -np.ones((multi.shape[0], 1024))
 
         if "apply_l2" in self.config and self.config["apply_l2"]:
             video = video / (np.linalg.norm(video, ord=2, axis=-1, keepdims=True))
             audio = audio / (np.linalg.norm(audio, ord=2, axis=-1, keepdims=True))
+            multi = multi / (np.linalg.norm(multi, ord=2, axis=-1, keepdims=True))
 
         if self.config["modality"] == "both":
             features = np.concatenate((video, audio), axis=-1)
@@ -290,6 +335,8 @@ class PerFile_Dataset(Dataset):
             features = audio
         elif self.config["modality"] == "video":
             features = video
+        elif self.config["modality"] == "multimodal":
+            features = multi
 
         return torch.tensor(features, dtype=torch.float32), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
 
