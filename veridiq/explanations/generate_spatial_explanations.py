@@ -50,6 +50,7 @@ class LinearModel(nn.Module):
 
 def load_model_classifier(feature_extractor_type):
     PATHS = {
+        "av-hubert-a": "/data/av-datasets/ckpts_linear_probing/ckpts/avh_audio/model-epoch=30.ckpt",
         "av-hubert-v": "/data/av-datasets/ckpts_linear_probing/ckpts/avh_video/model-epoch=71.ckpt",
         "clip": "output/clip-linear/model-epoch=98.ckpt",
         "fsfm": "output/fsfm-linear/model-epoch=98.ckpt",
@@ -58,6 +59,7 @@ def load_model_classifier(feature_extractor_type):
         "videomae": "/data/av-datasets/ckpts_linear_probing/ckpts/video_mae/model-epoch=99.ckpt",
     }
     DIMS = {
+        "av-hubert-a": 1024,
         "av-hubert-v": 1024,
         "clip": 768,
         "fsfm": 768,

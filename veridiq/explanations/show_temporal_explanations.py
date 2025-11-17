@@ -34,6 +34,7 @@ DEVICE = "cuda"
 DATASET = AV1M("val")
 
 FEATURES_DIR = {
+    "av-hubert-a": Path("/data/av-deepfake-1m/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features"),
     "av-hubert-v": Path("/data/av-deepfake-1m/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features"),
     "clip": Path("/data/av1m-test/other/CLIP_features/test"),
     "fsfm": Path("/data/audio-video-deepfake-3/FSFM_face_features/test_face_fix"),
@@ -42,6 +43,7 @@ FEATURES_DIR = {
 }
 
 SUBSAMPLING_FACTORS = {
+    "av-hubert-a": 1,
     "av-hubert-v": 1,
     "clip": 1,
     "fsfm": 1,
@@ -71,10 +73,11 @@ def load_test_paths(feature_extractor_type):
 
 def load_test_features(feature_extractor_type):
     FEATURE_TO_MODALITY = {
+        "av-hubert-a": "audio",
+        "wav2vec": "audio",
         "av-hubert-v": "video",
         "clip": "video",
         "fsfm": "video",
-        "wav2vec": "audio",
         "videomae": "video",
     }
     modality = FEATURE_TO_MODALITY[feature_extractor_type]
@@ -173,6 +176,7 @@ def get_per_frame_labels_video_mae(datum):
 
 
 GET_PER_FRAME_LABELS = {
+    "av-hubert-a": get_per_frame_labels_default,
     "av-hubert-v": get_per_frame_labels_default,
     "clip": get_per_frame_labels_default,
     "fsfm": get_per_frame_labels_default,
@@ -461,7 +465,7 @@ if __name__ == "__main__":
         feature_extractor_type = st.selectbox(
             "Feature Extractor",
             options=FEATURES_DIR.keys(),
-            index=3,
+            index=0,
         )
         sorter = st.selectbox(
             "Sort by",

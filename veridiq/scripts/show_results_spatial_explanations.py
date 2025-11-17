@@ -157,7 +157,9 @@ def make_table_examples():
     ]
 
     random.seed(17)
-    data_frames = random.sample(data_frames, 4)
+    data_frames1 = random.sample(data_frames, 4)
+    data_frames2 = random.sample(data_frames, 2)
+    data_frames = data_frames1 + data_frames2
     score_loader = SCORE_LOADERS["video"](CONFIG_NAME)
     gradcam_file = load_gradcam_file()
 
