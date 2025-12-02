@@ -9,6 +9,8 @@ import numpy as np
 from sklearn.metrics import roc_auc_score
 from sklearn.calibration import calibration_curve
 
+from toolz import identity
+
 from veridiq.linear_probing.train_test import evaluate_frame_level
 from veridiq.explanations.show_temporal_explanations import pred_to_proba
 
@@ -26,7 +28,10 @@ BASE_DIR = Path("output/training-linear-probing")
 def compute_ece(probs, labels, n_bins=10):
     prob_true, prob_pred = calibration_curve(labels, probs, n_bins=n_bins)
     B, _ = np.histogram(probs, bins=n_bins)
+    nonzero = B != 0
+    B = B[nonzero]
     N = len(probs)
+    assert sum(B) == N
     ece = np.sum(np.abs(prob_true - prob_pred) * B / N)
     return ece
 
@@ -80,10 +85,17 @@ def get_results_dfeval(config_names, dataset, evaluate):
         return BASE_DIR / config_name / "predict" / "bitdf" / "results.csv"
 
     def filter_results(df):
-        return df[df["paths"].str.startswith("Deepfake-Eval-2024/")]
+        return df[df["path"].str.startswith("Deepfake-Eval-2024/")]
+
+    FILTERS = {
+        "dfeval": filter_results,
+        "bitdfd": identity,
+    }
+
+    filter = FILTERS[dataset]
 
     dfs = [load_results_path(get_path(config_name)) for config_name in config_names]
-    dfs = [filter_results(df) for df in dfs]
+    dfs = [filter(df) for df in dfs]
     df = ensemble_results(dfs)
     return evaluate(df)
 
@@ -122,7 +134,7 @@ GET_RESULTS_FUNCS = {
 }
 
 
-def get_results(config_names):
+def get_results_full(config_names):
     RESULTS_CONFIGS = [
         ("av1m", "av1m", evaluate_auc),
         ("av1m-loc", "av1m", evaluate_frame_level),
@@ -132,6 +144,20 @@ def get_results(config_names):
     ]
     results1 = [GET_RESULTS_FUNCS[r](config_names, d, e) for r, d, e in RESULTS_CONFIGS]
     results2 = [GET_RESULTS_FUNCS[d](config_names, d, evaluate_ece) for d in DATASETS]
+    return results1 + results2
+
+
+def get_results_thin(config_names):
+    RESULTS_CONFIGS = [
+        ("av1m", "av1m"),
+        ("dfeval", "bitdfd"),
+    ]
+    results1 = [
+        GET_RESULTS_FUNCS[r](config_names, d, evaluate_auc) for r, d in RESULTS_CONFIGS
+    ]
+    results2 = [
+        GET_RESULTS_FUNCS[r](config_names, d, evaluate_ece) for r, d in RESULTS_CONFIGS
+    ]
     return results1 + results2
 
 
@@ -147,7 +173,7 @@ def get_results(config_names):
 )
 def main(config_names):
     assert len(config_names) >= 1, "At least one config name must be provided."
-    results = get_results(config_names)
+    results = get_results_thin(config_names)
     print(",".join(["{:.2f}".format(r) for r in results]))
 
 

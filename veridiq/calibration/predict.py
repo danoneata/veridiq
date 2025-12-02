@@ -11,9 +11,7 @@ from veridiq.utils import implies
 
 
 DIR_CKPTS = Path("output/training-linear-probing")
-
 DATASET_TR = "av1m"
-FEATURE_TYPE = "clip"
 
 
 DATA_PATHS = {
@@ -40,13 +38,24 @@ FEAT_PATHS = {
         "bitdf": "/data/av-extracted-features/bitdf_clip",
         "avlips": "/data/av-extracted-features/avlips_clip",
     },
+    "wav2vec2": {
+        "av1m": "/data/av-deepfake-1m-features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b/test",
+        "favc": "/data/av-extracted-features/favc_wav2vec/test",
+        "bitdf": "/data/av-extracted-features/bitdf_wav2vec",
+        "avlips": "/data/av-extracted-features/avlips_wav2vec",
+    }
+}
+
+
+INPUT_TYPES = {
+    "clip": "video",
+    "wav2vec2": "audio",
 }
 
 
 CONFIG = {
     # "csv_root_path": "/data/av-deepfake-1m/av_deepfake_1m/",
     # "metadata_path": "/data/av-deepfake-1m/av_deepfake_1m/val_metadata.json",
-    "input_type": "video",
     "fvfa_rvra_only": True,
     "apply_l2": True,
     "trimmed": False,
@@ -79,19 +88,20 @@ OTHER_CONFIG = {
 }
 
 
-def get_config(dataset_name, frame_level):
+def get_config(dataset_name, feature_type, frame_level):
     return {
         **CONFIG,
-        "root_path": FEAT_PATHS[FEATURE_TYPE][dataset_name],
+        "root_path": FEAT_PATHS[feature_type][dataset_name],
         "dataset_name": DATASET_NAMES[dataset_name],
         "frame_level": frame_level,
+        "input_type": INPUT_TYPES[feature_type],
         **DATA_PATHS[dataset_name],
         **OTHER_CONFIG[dataset_name],
     }
 
 
-def predict(config_name, dataset_te, frame_level):
-    config = get_config(dataset_te, frame_level)
+def predict(config_name, feature_type, dataset_te, frame_level):
+    config = get_config(dataset_te, feature_type, frame_level)
     dataset = DATASETS[dataset_te](config)
     dataloader = DataLoader(dataset, shuffle=False, batch_size=1)
     folder = DIR_CKPTS / config_name
@@ -110,6 +120,14 @@ def predict(config_name, dataset_te, frame_level):
     help="Name of the config (folder in output/training-linear-probing).",
 )
 @click.option(
+    "-f",
+    "--feature-type",
+    "feature_type",
+    type=str,
+    required=True,
+    help="Type of features to use (e.g., clip).",
+)
+@click.option(
     "-d",
     "--dataset-te",
     "dataset_te",
@@ -123,11 +141,11 @@ def predict(config_name, dataset_te, frame_level):
     is_flag=True,
     help="Whether to do frame-level prediction (only supported for av1m).",
 )
-def main(config_name, dataset_te, frame_level: bool):
+def main(config_name, feature_type, dataset_te, frame_level: bool):
     assert implies(
         frame_level, dataset_te == "av1m"
     ), "Frame-level only supported for av1m."
-    predict(config_name, dataset_te, frame_level)
+    predict(config_name, feature_type, dataset_te, frame_level)
 
 
 if __name__ == "__main__":
