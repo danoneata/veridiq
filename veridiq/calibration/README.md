@@ -11,7 +11,7 @@ Predict on multiple test datasets:
 ```bash
 for s in 1 2 3; do
     for d in av1m favc avlips bitdf; do
-        python veridiq/calibration/predict.py -c av1m-clip-conv-seed-1 -d $d -f clip
+        python veridiq/calibration/predict.py -c av1m-clip-conv-seed-${s} -d $d -f clip
     done
 done
 ```
