@@ -106,21 +106,33 @@ class AutoregressorHead(L.LightningModule):
         masks = masks[:, 1:]
 
         output = self.forward(features[:, :-1, :], masks)
-        mse_loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
+        if "loss_type" in self.config.keys() and self.config['loss_type'] == 'kl':
+            loss = torch.nn.functional.kl_div(output.log_softmax(dim=-1), features[:, 1:, :], reduction='none')
+        elif 'loss_type' not in self.config.keys() or self.config['loss_type'] == 'mse':
+            loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
 
-        mse_loss, _ = torch.max(mse_loss.mean(dim=-1), dim=-1)  # TODO: try multiple versions
+        loss, _ = torch.max(loss.mean(dim=-1), dim=-1)  # TODO: try multiple versions
 
-        return mse_loss
+        return loss
 
     def training_step(self, batch, batch_idx):
         features, masks, _, _ = batch
         masks = masks[:, 1:]
 
         output = self.forward(features[:, :-1, :], masks)
-        loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
+        if "loss_type" in self.config.keys() and self.config['loss_type'] == 'ce':
+            loss = torch.nn.functional.cross_entropy(output.transpose(1, 2), features[:, 1:, :].argmax(axis=-1), reduction='none')
+            loss = (loss * masks.float()).sum()
+            non_zero_elements = masks.sum()
+        elif "loss_type" in self.config.keys() and self.config['loss_type'] == 'kl':
+            loss = torch.nn.functional.kl_div(output.log_softmax(dim=-1), features[:, 1:, :], reduction='none')
+            loss = (loss * masks.unsqueeze(2).float()).sum()
+            non_zero_elements = (masks.sum() * features.shape[2])
+        elif 'loss_type' not in self.config.keys() or self.config['loss_type'] == 'mse':
+            loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
+            loss = (loss * masks.unsqueeze(2).float()).sum()
+            non_zero_elements = (masks.sum() * features.shape[2])
 
-        loss = (loss * masks.unsqueeze(2).float()).sum()
-        non_zero_elements = (masks.sum() * features.shape[2])
         loss = loss / non_zero_elements
 
         self.log("train_loss", loss)
@@ -132,10 +144,19 @@ class AutoregressorHead(L.LightningModule):
         masks = masks[:, 1:]
 
         output = self.forward(features[:, :-1, :], masks)
-        loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
+        if "loss_type" in self.config.keys() and self.config['loss_type'] == 'ce':
+            loss = torch.nn.functional.cross_entropy(output.transpose(1, 2), features[:, 1:, :].argmax(axis=-1), reduction='none')
+            loss = (loss * masks.float()).sum()
+            non_zero_elements = masks.sum()
+        elif "loss_type" in self.config.keys() and self.config['loss_type'] == 'kl':
+            loss = torch.nn.functional.kl_div(output.log_softmax(dim=-1), features[:, 1:, :], reduction='none')
+            loss = (loss * masks.unsqueeze(2).float()).sum()
+            non_zero_elements = (masks.sum() * features.shape[2])
+        elif 'loss_type' not in self.config.keys() or self.config['loss_type'] == 'mse':
+            loss = torch.nn.functional.mse_loss(output, features[:, 1:, :], reduction='none')
+            loss = (loss * masks.unsqueeze(2).float()).sum()
+            non_zero_elements = (masks.sum() * features.shape[2])
 
-        loss = (loss * masks.unsqueeze(2).float()).sum()
-        non_zero_elements = (masks.sum() * features.shape[2])
         loss = loss / non_zero_elements
 
         self.log("val_loss", loss, on_epoch=True)

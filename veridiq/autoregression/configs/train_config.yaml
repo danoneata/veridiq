@@ -1,21 +1,27 @@
 data_info:
-  name: "AV1M"
-  audio_root_path: "/mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/"  # /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b /mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/
-  video_root_path: "/av1m_test/other/CLIP_features"  # /av1m_test/other/CLIP_features
+  name: "AVAD"
+  audio_root_path: "/av_extracted_features/av1m_avad_delay/"  # /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b /mnt_1/real_data_features/45k+5k_split/av_hubert_features/self_large_vox_433h/
+  video_root_path: "/av_extracted_features/av1m_avad_delay/"  # /av1m_test/other/CLIP_features
+  multimodal_root_path: ""
   csv_root_path: "/mnt_1/real_data_features/45k+5k_split/"
   modality: "both"  # "both", "audio", "video"
   apply_l2: True
   batch_size: 32  # for mlp it should be 1
   num_workers: 32  # for mlp it should be 1
+  add_delay: 'only'
+  delay_type: "discrete"  # continous, discrete
+  delay_window: 15
+  # temp: 0.1
 
 model_hparams:
   model_name: "autoregressor"
-  feats_dim: 1792  # 768, 1024, 3840
+  feats_dim: 1  # 768, 1024, 3840
   d_model: 512
   nhead: 4
   d_ff: 1024
   num_layers: 4
   lr: 0.001
+  loss_type: "mse"
 
 # apply_pca:
 #   pca_model_path: "pca_analysis/self_large_vox_433h/pca_model.joblib"
@@ -29,10 +35,10 @@ model_hparams:
 
 callbacks:
   logger:
-    log_path: "outputs/logs/avh_audio_clip"
+    log_path: "outputs/logs/delay_disc_avad_mse"
     name: "csv"
   ckpt_args:
-    ckpt_dir: "outputs/ckpts/avh_audio_clip"
+    ckpt_dir: "outputs/ckpts/delay_disc_avad_mse"
     metric: "val_loss"
     mode: "min"
   early_stopping:

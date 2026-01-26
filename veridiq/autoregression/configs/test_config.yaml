@@ -1,16 +1,20 @@
 data_info:
-  name: "DFEval"  # FAVC, AV1M, DFEval
-  audio_root_path: "/av_extracted_features/bitdf_wav2vec"  # /mnt_1/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features/ /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b/test
-  video_root_path: "/av_extracted_features/bitdf_avh"  # /av1m_test/other/CLIP_features/test
-  csv_root_path: "/veridiq/dataset/filtered_tracks_processed/"  # "/mnt_1/av_deepfake_1m/" "/mnt/datasets/FakeAVCeleb_preprocessed/all_splits/" "/veridiq/dataset/filtered_tracks_processed/"
+  name: "AVAD"  # FAVC, AV1M, DFEval
+  audio_root_path: "/av_extracted_features/av1m_avad_delay/"  # /mnt_1/av_deepfake_1m/avhubert_checkpoints/self_large_vox_433h/test_features/ /av1m_features/real_data_features/45k+5k_split/WAV2VEC_features/xls-r-2b/test
+  video_root_path: "/av_extracted_features/av1m_avad_delay/"  # /av1m_test/other/CLIP_features/test
+  multimodal_root_path: ""
+  csv_root_path: "/mnt_1/av_deepfake_1m/"  # "/mnt_1/av_deepfake_1m/" "/mnt/datasets/FakeAVCeleb_preprocessed/all_splits/" "/veridiq/dataset/filtered_tracks_processed/"
   apply_l2: True
-  rvra_fvfa_only: True
+  rvra_fvfa_only: False
   # metadata_path: "/mnt_1/av_deepfake_1m/val_metadata.json"  # Used only if rvra_fvfa_only and name == AV1M
   files_to_remove: "/root/veridiq/veridiq/linear_probing/files_to_remove.txt"  # Used only if name == "DFEval"
   modality: "both"  # "both", "audio", "video"
+  add_delay: 'only'
+  delay_type: "continous"  # continous, discrete
+  delay_window: 15
 
-ckpt_path: "/root/veridiq/veridiq/autoregression/outputs/ckpts/wav2vec_avh_video/model-epoch=99.ckpt"
+ckpt_path: "/root/veridiq/veridiq/autoregression/outputs/ckpts/delay_cont_avad_kl/model-epoch=97.ckpt"
 
-output_path: "/root/veridiq/veridiq/autoregression/outputs/results_dfeval/wav2vec_avh_video"
+output_path: "/root/veridiq/veridiq/autoregression/outputs/results/delay_cont_avad_kl"
 
 seed: 43

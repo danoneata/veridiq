@@ -13,6 +13,37 @@ INVALID_VIDS = [
     "RealVideo-RealAudio/Asian_East/men/id04789/002121.mp4",
 ]
 
+def delay_compute(feat1, feat2, vshift, delay_type, temp=1.0):
+    feat1 = torch.tensor(feat1)
+    feat2 = torch.tensor(feat2)
+
+    feat1 = torch.nn.functional.normalize(feat1, p=2, dim=1)
+    feat2 = torch.nn.functional.normalize(feat2, p=2, dim=1)
+
+    diff = len(feat1) - len(feat2)
+    if diff < 0:
+        feat2 = feat2[:diff]
+    elif diff > 0:
+        feat1 = feat1[:-diff]
+
+    win_size = vshift * 2 + 1
+    feat2p = torch.nn.functional.pad(feat2, (0, 0, vshift, vshift))
+    S = []
+
+    for i in range(0, len(feat1)):
+        S.append(torch.nn.functional.cosine_similarity(feat1[[i], :].repeat(win_size, 1), feat2p[i: i + win_size, :]))
+    S = torch.stack(S, dim=0)
+
+    if delay_type == "continous":
+        S /= temp
+        S = torch.nn.functional.softmax(S, dim=-1).numpy()
+        return S
+    elif delay_type == "discrete":
+        best_match = np.argmax(S.numpy(), axis=1, keepdims=True)
+        best_match -= vshift  # center it
+        best_match = best_match.astype(np.float32)
+        best_match /= (2 * vshift + 1)
+        return best_match
 
 ###### AV1M ######
 
@@ -94,7 +125,49 @@ class AV1M_RealOnly_Dataset(Dataset):
         elif self.config["modality"] == "multimodal":
             features = multi
 
-        return torch.tensor(features), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
+        if "add_delay" in self.config:
+            temp = float(self.config['temp']) if 'temp' in self.config else 1.0
+            if self.config["add_delay"] == 'additive':
+                features = np.concatenate((features, delay_compute(video, audio, vshift=self.config["delay_window"], delay_type=self.config["delay_type"], temp=temp)), axis=-1)
+            elif self.config['add_delay'] == 'only':
+                features = delay_compute(video, audio, vshift=self.config["delay_window"], delay_type=self.config["delay_type"], temp=temp)
+
+        return torch.tensor(features, dtype=torch.float32), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
+
+
+class AVAD_Delay_Dataset(AV1M_RealOnly_Dataset):
+    def __init__(self, config, split="train"):
+        self.config = config
+        self.split = split
+
+        self.csv_root_path = self.config["csv_root_path"]
+        if split == "test":
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, f"{self.split}_labels.csv"))
+        else:
+            self.df = pd.read_csv(os.path.join(self.csv_root_path, f"real_{self.split}_data.csv"))
+
+        self.audio_root_path = self.config["audio_root_path"]
+        self.video_root_path = self.config["video_root_path"]
+        self.multimodal_root_path = self.config["multimodal_root_path"]
+        self.audio_feats_dir = os.path.join(self.audio_root_path, self.split)
+        self.video_feats_dir = os.path.join(self.video_root_path, self.split)  # TODO: find a better workaround for CLIP
+        self.multimodal_feats_dir = os.path.join(self.multimodal_root_path, self.split)
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        label = int(row["label"])
+
+        assert self.audio_feats_dir == self.video_feats_dir
+        delays = self._get_feats(row, "", self.audio_feats_dir)
+        assert delays.shape[-1] == 31
+        if self.config["delay_type"] == "continous":
+            delays = torch.nn.functional.softmax(torch.tensor(delays), dim=-1).numpy()
+        else:
+            delays = np.argmax(delays, axis=-1, keepdims=True)
+            delays -= self.config["delay_window"]
+            delays = delays.astype(np.float32)
+            delays /= (2 * self.config["delay_window"] + 1)
+
+        return torch.tensor(delays, dtype=torch.float32), torch.ones(delays.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
 
 
 class CombinedForm_Dataset(Dataset):
@@ -241,6 +314,13 @@ class CombinedForm_Dataset(Dataset):
         elif self.config["modality"] == "multimodal":
             features = multi
 
+        if "add_delay" in self.config:
+            temp = float(self.config['temp']) if 'temp' in self.config else 1.0
+            if self.config["add_delay"] == 'additive':
+                features = np.concatenate((features, delay_compute(video, audio, vshift=self.config["delay_window"], delay_type=self.config["delay_type"], temp=temp)), axis=-1)
+            elif self.config['add_delay'] == 'only':
+                features = delay_compute(video, audio, vshift=self.config["delay_window"], delay_type=self.config["delay_type"], temp=temp)
+
         return torch.tensor(features, dtype=torch.float32), torch.ones(features.shape[0]), labels, path  # features, mask, labels, path
 
 
@@ -338,6 +418,13 @@ class PerFile_Dataset(Dataset):
         elif self.config["modality"] == "multimodal":
             features = multi
 
+        if "add_delay" in self.config:
+            temp = float(self.config['temp']) if 'temp' in self.config else 1.0
+            if self.config["add_delay"] == 'additive':
+                features = np.concatenate((features, delay_compute(video, audio, vshift=self.config["delay_window"], delay_type=self.config["delay_type"], temp=temp)), axis=-1)
+            elif self.config['add_delay'] == 'only':
+                features = delay_compute(video, audio, vshift=self.config["delay_window"], delay_type=self.config["delay_type"], temp=temp)
+
         return torch.tensor(features, dtype=torch.float32), torch.ones(features.shape[0]), label, row["path"][:-4] + ".npz"  # features, mask, label, path
 
 
@@ -372,6 +459,8 @@ def load_data(config, test=False):
             test_ds = CombinedForm_Dataset(config)
         elif config["name"] == "DFEval":
             test_ds = PerFile_Dataset(config)
+        elif config["name"] == "AVAD":
+            test_ds = AVAD_Delay_Dataset(config, split="test")
         else:
             raise ValueError("Dataset name error. Expected: AV1M, FAVC; Got: " + config["name"])
 
@@ -380,8 +469,13 @@ def load_data(config, test=False):
         return test_dl
 
     else:
-        train_ds = AV1M_RealOnly_Dataset(config, split="train")
-        val_ds = AV1M_RealOnly_Dataset(config, split="val")
+        if config["name"] == "AVAD":
+            print("Using AVAD dataset")
+            train_ds = AVAD_Delay_Dataset(config, split="train")
+            val_ds = AVAD_Delay_Dataset(config, split="val")
+        else:
+            train_ds = AV1M_RealOnly_Dataset(config, split="train")
+            val_ds = AV1M_RealOnly_Dataset(config, split="val")
 
         train_dl = DataLoader(train_ds, shuffle=True, batch_size=config["batch_size"], collate_fn=collate_fn, num_workers=config["num_workers"])
         val_dl = DataLoader(val_ds, shuffle=False, batch_size=config["batch_size"], collate_fn=collate_fn, num_workers=config["num_workers"])
