@@ -47,3 +47,7 @@ black <file_path>
 - `veridiq/fsfm/` - FSFM model implementations
 - `veridiq/show_predictions.py` - Main prediction and visualization module
 - `veridiq/scripts/` - Analysis and processing scripts
+
+## Acknowledgements
+
+This work is supported by by CNCS-UEFISCDI (PN-IV-P7-7.1-PTE-2024-0600)
