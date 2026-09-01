@@ -104,17 +104,89 @@ def get_frame_level(config):
     )
 
 
+def load_linear_model_for_eval(path_checkpoint, config):
+    """Load a LinearModel for feature-based eval.
+
+    Accepts:
+    - standard LinearModel checkpoints (head only + Lightning hparams)
+    - online CLIP / Wav2Vec checkpoints (full backbone + head): only the
+      classification head is kept; backbone weights are ignored
+    """
+    ckpt = torch.load(path_checkpoint, map_location="cpu", weights_only=False)
+    state = ckpt.get("state_dict", {})
+    head_state = {k: v for k, v in state.items() if k.startswith("head.")}
+    if "head.weight" not in head_state or "head.bias" not in head_state:
+        raise ValueError(f"No linear head found in checkpoint: {path_checkpoint}")
+
+    backbone_prefixes = ("clip_model.", "wav2vec.", "feature_extractor.")
+    has_backbone = any(k.startswith(backbone_prefixes) for k in state)
+    has_hparams = bool(ckpt.get("hyper_parameters"))
+
+    if has_hparams and not has_backbone:
+        return LinearModel.load_from_checkpoint(path_checkpoint)
+
+    # Online (or hparams-less) ckpt: build LinearModel from eval config + head.
+    feats_dim = int(head_state["head.weight"].shape[1])
+    if "model_hparams" in config:
+        model_hparams = dict(config["model_hparams"])
+        model_hparams.setdefault("feats_dim", feats_dim)
+        input_type = model_hparams.get(
+            "input_type", config["data_info"].get("input_type", "video")
+        )
+        model_hparams["input_type"] = input_type
+    else:
+        model_hparams = {
+            "input_type": config["data_info"]["input_type"],
+            "feats_dim": feats_dim,
+        }
+
+    if int(model_hparams["feats_dim"]) != feats_dim:
+        raise ValueError(
+            f"Checkpoint head feats_dim={feats_dim} does not match "
+            f"config feats_dim={model_hparams['feats_dim']}"
+        )
+
+    model = LinearModel(config={"model_hparams": model_hparams})
+    model.load_state_dict(head_state, strict=True)
+    print(
+        f"Loaded LinearModel head from online/partial ckpt "
+        f"(feats_dim={feats_dim}, input_type={model_hparams['input_type']})",
+        flush=True,
+    )
+    return model
+
+
 def train(config):
-    train_dl, val_dl = load_data(config=config["data_info"])
-    model = LinearModel(config=config)
+    if config.get("data_info", {}).get("online_clip", False):
+        from veridiq.linear_probing.clip_online_randaugment import (
+            OnlineCLIPLinearModel,
+            load_data_online_clip,
+        )
+
+        train_dl, val_dl = load_data_online_clip(config=config["data_info"])
+        model = OnlineCLIPLinearModel(config=config)
+    elif config.get("data_info", {}).get("online_wav2vec", False):
+        from veridiq.linear_probing.wav2vec_online_randaugment import (
+            OnlineWav2VecLinearModel,
+            load_data_online_wav2vec,
+        )
+
+        train_dl, val_dl = load_data_online_wav2vec(config=config["data_info"])
+        model = OnlineWav2VecLinearModel(config=config)
+    else:
+        train_dl, val_dl = load_data(config=config["data_info"])
+        model = LinearModel(config=config)
     logger, callbacks = init_callbacks(config=config["callbacks"])
 
     trainer = L.Trainer(max_epochs=config["epochs"], logger=logger, callbacks=callbacks)
     trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
 
 
-def test1(dataloader, path_checkpoint, path_output, is_frame_level=False):
-    model = LinearModel.load_from_checkpoint(path_checkpoint)
+def test1(dataloader, path_checkpoint, path_output, is_frame_level=False, config=None):
+    if config is None:
+        model = LinearModel.load_from_checkpoint(path_checkpoint)
+    else:
+        model = load_linear_model_for_eval(path_checkpoint, config)
     model.to("cuda")
     model.eval()
 
@@ -207,6 +279,7 @@ def test(config):
         path_checkpoint=path_checkpoint,
         path_output=path_output,
         is_frame_level=is_frame_level,
+        config=config,
     )
 
     with open(os.path.join(path_output, "tested_config.yaml"), "w") as f:
